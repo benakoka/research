@@ -37,7 +37,7 @@ function Field({
 }
 
 const inputClass =
-  "w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500";
+  "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500";
 
 export default function SettingsPage() {
   const [data, setData] = useState<SettingsResponse | null>(null);
