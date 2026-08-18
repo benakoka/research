@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { executeAttributionCell } from "@/lib/attributionExec";
 import { withApiErrorHandling } from "@/lib/apiError";
-import { AttributionCell, ModelProvider } from "@/lib/types";
+import { AttributionCell } from "@/lib/types";
 
 // Modest concurrency per batch to avoid hammering provider rate limits (§5).
 // The client owns the run state and drives batching itself (see
@@ -27,23 +27,7 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
   }
 
   const batch = body.cells.slice(0, MAX_BATCH_SIZE);
+  const results = await Promise.all(batch.map((cell) => executeAttributionCell(body.promptTemplate, cell)));
 
-  const usage: Record<ModelProvider, { calls: number; inputTokens: number; outputTokens: number }> = {
-    GPT: { calls: 0, inputTokens: 0, outputTokens: 0 },
-    Gemini: { calls: 0, inputTokens: 0, outputTokens: 0 },
-  };
-
-  const results = await Promise.all(
-    batch.map(async (cell) => {
-      const { cell: updated, usage: cellUsage } = await executeAttributionCell(body.promptTemplate, cell);
-      if (cellUsage) {
-        usage[cell.model].calls += 1;
-        usage[cell.model].inputTokens += cellUsage.inputTokens;
-        usage[cell.model].outputTokens += cellUsage.outputTokens;
-      }
-      return updated;
-    })
-  );
-
-  return NextResponse.json({ cells: results, usage });
+  return NextResponse.json({ cells: results });
 });

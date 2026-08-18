@@ -8,9 +8,8 @@ import {
   getRewritingRun,
   saveRewritingRun,
   clearRewritingRun,
-  addUsage,
 } from "@/lib/clientStorage";
-import { RewritingChain, RewritingRun, ModelProvider, VignetteSet } from "@/lib/types";
+import { RewritingChain, RewritingRun, VignetteSet } from "@/lib/types";
 import { missesTarget } from "@/lib/wordcount";
 
 const BATCH_SIZE = 8;
@@ -60,7 +59,6 @@ export default function RewritingPage() {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? "Batch failed.");
-    addUsage(body.usage as Record<ModelProvider, { calls: number; inputTokens: number; outputTokens: number }>);
     return body.chains as RewritingChain[];
   }
 

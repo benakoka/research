@@ -8,9 +8,8 @@ import {
   getAttributionRun,
   saveAttributionRun,
   clearAttributionRun,
-  addUsage,
 } from "@/lib/clientStorage";
-import { AttributionCell, AttributionRun, ModelProvider, VignetteSet } from "@/lib/types";
+import { AttributionCell, AttributionRun, VignetteSet } from "@/lib/types";
 import { summarizeProgress } from "@/lib/progress";
 
 const BATCH_SIZE = 8;
@@ -49,7 +48,6 @@ export default function AttributionPage() {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? "Batch failed.");
-    addUsage(body.usage as Record<ModelProvider, { calls: number; inputTokens: number; outputTokens: number }>);
     return body.cells as AttributionCell[];
   }
 

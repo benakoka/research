@@ -14,9 +14,6 @@ import {
   VignetteSet,
   AttributionRun,
   RewritingRun,
-  UsageCounters,
-  EMPTY_USAGE,
-  ModelProvider,
 } from "./types";
 
 const KEYS = {
@@ -24,7 +21,6 @@ const KEYS = {
   vignetteSet: "pilot:vignetteSet",
   attributionRun: "pilot:attributionRun",
   rewritingRun: "pilot:rewritingRun",
-  usage: "pilot:usage",
 } as const;
 
 function isBrowser() {
@@ -109,26 +105,4 @@ export function saveRewritingRun(run: RewritingRun): void {
 
 export function clearRewritingRun(): void {
   clear(KEYS.rewritingRun);
-}
-
-// ---------------------------------------------------------------------------
-// Usage / cost visibility (§5) — accumulated client-side across every batch
-// response this browser has seen, since there's no server to total it.
-// ---------------------------------------------------------------------------
-
-export function getUsage(): UsageCounters {
-  return read<UsageCounters>(KEYS.usage, EMPTY_USAGE);
-}
-
-export function addUsage(delta: Partial<Record<ModelProvider, { calls: number; inputTokens: number; outputTokens: number }>>): UsageCounters {
-  const current = getUsage();
-  for (const model of Object.keys(delta) as ModelProvider[]) {
-    const d = delta[model];
-    if (!d) continue;
-    current.calls[model] = (current.calls[model] ?? 0) + d.calls;
-    current.inputTokens[model] = (current.inputTokens[model] ?? 0) + d.inputTokens;
-    current.outputTokens[model] = (current.outputTokens[model] ?? 0) + d.outputTokens;
-  }
-  write(KEYS.usage, current);
-  return current;
 }

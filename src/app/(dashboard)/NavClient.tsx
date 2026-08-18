@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { CostSummary, summarizeCost } from "@/lib/cost";
-import { getSettings, getUsage } from "@/lib/clientStorage";
+import { getSettings } from "@/lib/clientStorage";
 
 const links = [
   { href: "/", label: "Home" },
@@ -13,25 +12,21 @@ const links = [
   { href: "/settings", label: "Settings" },
 ];
 
-function fmtCost(c: number | null) {
-  if (c === null) return null;
-  return `$${c.toFixed(2)}`;
-}
-
 export default function NavClient() {
   const pathname = usePathname();
   const router = useRouter();
-  const [costs, setCosts] = useState<CostSummary[]>([]);
+  const [snapshots, setSnapshots] = useState<{ gpt: string; gemini: string } | null>(null);
 
   useEffect(() => {
     function refresh() {
-      setCosts(summarizeCost(getUsage(), getSettings()));
+      const settings = getSettings();
+      setSnapshots({ gpt: settings.gptModelSnapshot, gemini: settings.geminiModelSnapshot });
     }
     refresh();
     // The layout stays mounted across client-side navigations, so this
-    // polls to stay roughly current with usage accumulating on the
-    // Attribution/Rewriting pages (a same-tab localStorage write doesn't
-    // fire the `storage` event, only cross-tab writes do).
+    // polls to stay current if the snapshot strings change on Settings
+    // (a same-tab localStorage write doesn't fire the `storage` event,
+    // only cross-tab writes do).
     const interval = setInterval(refresh, 2000);
     return () => clearInterval(interval);
   }, []);
@@ -70,17 +65,12 @@ export default function NavClient() {
           </nav>
         </div>
         <div className="flex items-center gap-4 text-xs text-slate-500">
-          {costs.map((c) => (
-            <div key={c.model} className="text-right leading-tight">
-              <div className="font-mono">
-                {c.model}: {c.snapshot || <span className="italic">no snapshot set</span>}
-              </div>
-              <div>
-                {c.calls} calls
-                {fmtCost(c.estimatedCostUsd) ? ` · ~${fmtCost(c.estimatedCostUsd)}` : ""}
-              </div>
+          {snapshots && (
+            <div className="text-right font-mono leading-tight">
+              <div>GPT: {snapshots.gpt || <span className="italic">no snapshot set</span>}</div>
+              <div>Gemini: {snapshots.gemini || <span className="italic">no snapshot set</span>}</div>
             </div>
-          ))}
+          )}
           <button
             onClick={logout}
             className="rounded-md border border-slate-300 px-2 py-1 text-slate-600 hover:bg-slate-100"

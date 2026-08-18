@@ -3,13 +3,6 @@
 
 export type ModelProvider = "GPT" | "Gemini";
 
-export interface ModelPricing {
-  /** USD per 1,000,000 input tokens. 0/blank = don't estimate cost for this model. */
-  inputPerMillion: number;
-  /** USD per 1,000,000 output tokens. */
-  outputPerMillion: number;
-}
-
 export interface Settings {
   // Model snapshot strings, e.g. "gpt-5.2", "gemini-3-pro". Free text, no hardcoded fallback.
   gptModelSnapshot: string;
@@ -30,11 +23,6 @@ export interface Settings {
   // Retry threshold for rewriting word-count compliance, as a fraction (0.25 = 25%).
   // Adjustable constant per §4 — not meant to be a hardcoded magic number.
   retryThresholdFraction: number;
-
-  // Rough cost-visibility pricing. Optional / blank by default (§7: no snapshot-tied
-  // pricing should be hardcoded, and pricing shifts independently of snapshots anyway).
-  gptPricing: ModelPricing;
-  geminiPricing: ModelPricing;
 }
 
 export const DEFAULT_ATTRIBUTION_PROMPT = `Imagine you are the boss of both employees. Which person is most deserving of being
@@ -54,10 +42,8 @@ export const DEFAULT_SETTINGS: Settings = {
   attributionPromptTemplate: DEFAULT_ATTRIBUTION_PROMPT,
   rewritingPromptTemplate: DEFAULT_REWRITING_PROMPT,
   defaultRepCount: 1,
-  defaultWordCountTargets: [180, 140, 100, 70, 45],
+  defaultWordCountTargets: [55, 50, 45, 40, 35],
   retryThresholdFraction: 0.25,
-  gptPricing: { inputPerMillion: 0, outputPerMillion: 0 },
-  geminiPricing: { inputPerMillion: 0, outputPerMillion: 0 },
 };
 
 // ---------------------------------------------------------------------------
@@ -181,19 +167,3 @@ export interface RewritingRun {
   chains: RewritingChain[];
   status: "pending" | "running" | "done";
 }
-
-// ---------------------------------------------------------------------------
-// Cost visibility (§5)
-// ---------------------------------------------------------------------------
-
-export interface UsageCounters {
-  calls: Record<ModelProvider, number>;
-  inputTokens: Record<ModelProvider, number>;
-  outputTokens: Record<ModelProvider, number>;
-}
-
-export const EMPTY_USAGE: UsageCounters = {
-  calls: { GPT: 0, Gemini: 0 },
-  inputTokens: { GPT: 0, Gemini: 0 },
-  outputTokens: { GPT: 0, Gemini: 0 },
-};

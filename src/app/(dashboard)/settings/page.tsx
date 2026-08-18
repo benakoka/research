@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSettings, saveSettings, getUsage } from "@/lib/clientStorage";
-import { summarizeCost, CostSummary } from "@/lib/cost";
+import { getSettings, saveSettings } from "@/lib/clientStorage";
 import { Settings } from "@/lib/types";
 
 interface KeyStatus {
@@ -35,15 +34,12 @@ const inputClass =
 export default function SettingsPage() {
   const [data, setData] = useState<Settings | null>(null);
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
-  const [costs, setCosts] = useState<CostSummary[]>([]);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      const settings = getSettings();
-      setData(settings);
-      setCosts(summarizeCost(getUsage(), settings));
+      setData(getSettings());
       try {
         const res = await fetch("/api/settings");
         setKeyStatus(await res.json());
@@ -59,9 +55,7 @@ export default function SettingsPage() {
 
   function saveAll() {
     if (!data) return;
-    const saved = saveSettings(data);
-    setData(saved);
-    setCosts(summarizeCost(getUsage(), saved));
+    setData(saveSettings(data));
     setSavedAt(Date.now());
   }
 
@@ -101,6 +95,8 @@ export default function SettingsPage() {
           them out of any browser storage entirely. Change them from the
           Vercel project settings (or <code>.env.local</code> for local
           dev); this screen just shows whether one is currently configured.
+          Manage spending caps directly in the OpenAI/Google billing
+          dashboards — this app doesn&apos;t track or limit cost.
         </p>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div className="rounded-md bg-slate-50 p-3">
@@ -224,76 +220,6 @@ export default function SettingsPage() {
             <span className="text-sm text-slate-500">%</span>
           </div>
         </Field>
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 font-semibold text-slate-900">Cost visibility</h2>
-        <p className="mb-4 text-xs text-slate-500">
-          Rough running estimate only, accumulated in this browser across
-          every batch it has run — there is no spending cap in this app.
-          Manage budget limits directly in the OpenAI/Google billing
-          platforms. Enter $/1M token pricing below to see a dollar estimate;
-          call counts are always shown regardless.
-        </p>
-        <div className="mb-4 grid grid-cols-2 gap-4">
-          {costs.map((c) => (
-            <div key={c.model} className="rounded-md bg-slate-50 p-3 text-sm">
-              <div className="font-mono font-medium">{c.model}</div>
-              <div className="text-slate-600">
-                {c.calls} calls · {c.inputTokens.toLocaleString()} in / {c.outputTokens.toLocaleString()} out tok
-                {c.estimatedCostUsd !== null && ` · ~$${c.estimatedCostUsd.toFixed(2)}`}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className="mb-2 text-xs font-medium text-slate-600">GPT pricing ($ / 1M tokens)</p>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                placeholder="input"
-                value={data.gptPricing.inputPerMillion || ""}
-                onChange={(e) =>
-                  update("gptPricing", { ...data.gptPricing, inputPerMillion: Number(e.target.value) })
-                }
-                className={inputClass}
-              />
-              <input
-                type="number"
-                placeholder="output"
-                value={data.gptPricing.outputPerMillion || ""}
-                onChange={(e) =>
-                  update("gptPricing", { ...data.gptPricing, outputPerMillion: Number(e.target.value) })
-                }
-                className={inputClass}
-              />
-            </div>
-          </div>
-          <div>
-            <p className="mb-2 text-xs font-medium text-slate-600">Gemini pricing ($ / 1M tokens)</p>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                placeholder="input"
-                value={data.geminiPricing.inputPerMillion || ""}
-                onChange={(e) =>
-                  update("geminiPricing", { ...data.geminiPricing, inputPerMillion: Number(e.target.value) })
-                }
-                className={inputClass}
-              />
-              <input
-                type="number"
-                placeholder="output"
-                value={data.geminiPricing.outputPerMillion || ""}
-                onChange={(e) =>
-                  update("geminiPricing", { ...data.geminiPricing, outputPerMillion: Number(e.target.value) })
-                }
-                className={inputClass}
-              />
-            </div>
-          </div>
-        </div>
       </section>
 
       {error && <p className="text-sm text-red-600">{error}</p>}

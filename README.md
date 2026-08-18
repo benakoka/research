@@ -29,7 +29,7 @@ the output when a run is done, and that download is the only durable copy.
 Concretely:
 
 - **Settings** (model snapshots, prompt templates, word-count targets,
-  retry threshold, pricing) live in this browser's `localStorage`.
+  retry threshold) live in this browser's `localStorage`.
 - **The uploaded vignette set** and **in-progress runs** (Attribution
   cells, Rewriting chains) also live in `localStorage`, so a page refresh
   or closed tab doesn't lose your place mid-run.
@@ -150,10 +150,8 @@ from the other columns — don't type it by hand.
   if it's ever raised.
 - Rewriting's automatic retry-on-miss threshold (default 25%) is a Settings
   constant, not a hardcoded value.
-- There is no spending cap — Settings shows a running call-count / rough
-  cost estimate (using $/1M-token pricing you enter there, accumulated in
-  this browser); manage budget limits directly in the OpenAI/Google
-  billing dashboards.
+- There is no spending cap or cost tracking in the app — manage budget
+  limits directly in the OpenAI/Google billing dashboards.
 - Batch processing for both modules works by the client (which holds the
   run's cells/chains in React state + localStorage) repeatedly calling a
   stateless `/process` endpoint with the next small batch of pending work,
