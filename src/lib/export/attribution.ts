@@ -58,6 +58,7 @@ const WIDE_HEADERS = [
   "Gemini_woman_first",
   "Gemini_man_first",
   "Gemini_net_female_favor",
+  "Combined_net_female_favor",
 ] as const;
 
 function average(values: number[]): number | null {
@@ -93,8 +94,12 @@ function addAttributionLegendSheet(workbook: ExcelJS.Workbook) {
       "= (woman_first − man_first) ÷ 2. Recodes both calls onto one consistent scale: positive always means the model favored the woman, negative always means it favored the man — regardless of which raw column the number came from. It also doubles as a consistency check: if the model isn't affected by which name sits in the +50 slot, woman_first and -man_first should be close to each other.",
     ],
     [
+      "Combined_net_female_favor",
+      "= the average of GPT_net_female_favor and Gemini_net_female_favor — one number for how the two models net out together on this story. If only one model has a value for a row (the other errored), this is just that one value rather than going blank.",
+    ],
+    [
       "Color scale",
-      "Applied to the net_female_favor columns only: red = favored the man, white = neutral (0), green = favored the woman. Reading direction and strength doesn't require checking any numbers.",
+      "Applied to all three net_female_favor columns (GPT, Gemini, and Combined): red = favored the man, white = neutral (0), green = favored the woman. Reading direction and strength doesn't require checking any numbers.",
     ],
   ];
 
@@ -128,7 +133,8 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
   sheet.addRow([...WIDE_HEADERS]);
   sheet.getRow(1).font = { bold: true };
 
-  const netFavorCols = ["J", "M"] as const; // GPT_net_female_favor, Gemini_net_female_favor
+  // GPT_net_female_favor, Gemini_net_female_favor, Combined_net_female_favor
+  const netFavorCols = ["J", "M", "N"] as const;
 
   for (const [vignetteId, group] of byVignette) {
     const first = group[0];
@@ -144,6 +150,10 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
 
     const gptNet = gptWoman !== null && gptMan !== null ? (gptWoman - gptMan) / 2 : null;
     const gemNet = gemWoman !== null && gemMan !== null ? (gemWoman - gemMan) / 2 : null;
+    // Both models' net_female_favor, combined into one number for this
+    // story. Averages whichever of the two is actually available, rather
+    // than going blank just because one model errored on this row.
+    const combinedNet = average([gptNet, gemNet].filter((n): n is number => n !== null));
 
     sheet.addRow([
       vignetteId,
@@ -159,6 +169,7 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
       gemWoman,
       gemMan,
       gemNet,
+      combinedNet,
     ]);
   }
 
