@@ -1,8 +1,13 @@
 #!/usr/bin/env node
-// Generates templates/vignette_upload_template.xlsx — the canonical input
-// format for both modules (build spec §6). This file lives outside the app
-// (it's never bundled with or read by the running site) and is distributed
-// to anyone contributing vignette sets.
+// Generates the canonical vignette upload template (build spec §6) and
+// writes it to two places that need to stay in sync:
+//   - templates/vignette_upload_template.xlsx — source of truth, read
+//     server-side by the /template preview page.
+//   - public/vignette_upload_template.xlsx — the same file, served
+//     statically so the site can offer it as a direct download.
+// This is only the schema/format — the app never reads real vignette data
+// out of this file itself; someone still has to upload a filled-in copy
+// through the Attribution/Rewriting pages to actually use it.
 //
 // NOTE: the real 18-scenario / 36-row seed set referenced in the build spec
 // was not included in the files shipped alongside the spec, so this script
@@ -119,8 +124,11 @@ for (let r = 2; r <= DATA_VALIDATION_LAST_ROW; r++) {
   };
 }
 
-const outDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates");
-const outPath = path.join(outDir, "vignette_upload_template.xlsx");
+const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const templatesPath = path.join(repoRoot, "templates", "vignette_upload_template.xlsx");
+const publicPath = path.join(repoRoot, "public", "vignette_upload_template.xlsx");
 
-await workbook.xlsx.writeFile(outPath);
-console.log(`Wrote ${outPath}`);
+await workbook.xlsx.writeFile(templatesPath);
+await workbook.xlsx.writeFile(publicPath);
+console.log(`Wrote ${templatesPath}`);
+console.log(`Wrote ${publicPath}`);

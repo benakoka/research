@@ -33,7 +33,7 @@ export default function HomePage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Link
           href="/attribution"
           className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:border-slate-400"
@@ -50,6 +50,15 @@ export default function HomePage() {
           <h2 className="font-semibold text-slate-900">Rewriting module</h2>
           <p className="mt-1 text-sm text-slate-500">
             {rwRun ? `In-browser run: ${rwRun.status}` : "No run yet."}
+          </p>
+        </Link>
+        <Link
+          href="/template"
+          className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm hover:border-slate-400"
+        >
+          <h2 className="font-semibold text-slate-900">Upload template</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            View the blank vignette spreadsheet, or download it to fill in.
           </p>
         </Link>
         <Link

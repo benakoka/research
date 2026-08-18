@@ -126,13 +126,25 @@ publicly discoverable.
 
 ## Vignette input format
 
-`templates/vignette_upload_template.xlsx` is the canonical input, with an
-`Instructions` tab and a `Vignettes` data tab (header row 1, data from row
-2, parsed by column header name). It has one illustrative example scenario
-(not real data — see the script that generates it) rather than the real
-18-scenario/36-row seed set, since that content wasn't included in the
-files this app was built from. Regenerate the template (e.g. after adding a
-column) with:
+The canonical input has an `Instructions` tab and a `Vignettes` data tab
+(header row 1, data from row 2, parsed by column header name). It has one
+illustrative example scenario (not real data — see the script that
+generates it) rather than the real 18-scenario/36-row seed set, since that
+content wasn't included in the files this app was built from.
+
+It's shipped from two places in the repo, kept identical by
+`scripts/build-vignette-template.mjs`:
+
+- `templates/vignette_upload_template.xlsx` — source of truth, read
+  server-side by the `/template` preview page.
+- `public/vignette_upload_template.xlsx` — the same file, served
+  statically so the app can offer it as a direct download.
+
+The app itself surfaces both: every Attribution/Rewriting page has
+"Download blank template" and "View template" links (the latter opens
+`/template`, a read-only in-browser preview of both tabs — no upload
+needed just to see the format). Regenerate both copies (e.g. after adding
+a column) with:
 
 ```bash
 node scripts/build-vignette-template.mjs

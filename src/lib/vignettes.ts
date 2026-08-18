@@ -21,7 +21,7 @@ const VALID_ORDER_VARIANTS = new Set<OrderVariant>(["A", "B"]);
 export class VignetteParseError extends Error {}
 
 /** Extracts plain text from any ExcelJS cell value, including formula results and rich text. */
-function cellText(value: ExcelJS.CellValue): string {
+export function cellText(value: ExcelJS.CellValue): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
   if (typeof value === "number") return String(value);
@@ -42,6 +42,21 @@ function cellText(value: ExcelJS.CellValue): string {
 export interface ParsedVignettes {
   rows: VignetteRow[];
   warnings: string[];
+}
+
+/** Reads the template's `Instructions` tab as plain label/description rows, for the preview page. */
+export async function parseInstructionsSheet(buffer: ArrayBuffer): Promise<string[][]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const sheet = workbook.getWorksheet("Instructions");
+  if (!sheet) return [];
+  const rows: string[][] = [];
+  sheet.eachRow((row) => {
+    const cells: string[] = [];
+    row.eachCell({ includeEmpty: true }, (cell) => cells.push(cellText(cell.value)));
+    if (cells.some((c) => c.trim() !== "")) rows.push(cells);
+  });
+  return rows;
 }
 
 /**

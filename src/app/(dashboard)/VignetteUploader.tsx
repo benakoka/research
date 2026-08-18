@@ -52,7 +52,7 @@ export default function VignetteUploader({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <label className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
           {uploading ? "Uploading…" : "Upload vignette_upload_template.xlsx"}
           <input
@@ -63,6 +63,21 @@ export default function VignetteUploader({
             disabled={uploading}
           />
         </label>
+        <a
+          href="/vignette_upload_template.xlsx"
+          download
+          className="text-sm font-medium text-slate-500 underline hover:text-slate-700"
+        >
+          Download blank template
+        </a>
+        <a
+          href="/template"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-medium text-slate-500 underline hover:text-slate-700"
+        >
+          View template ↗
+        </a>
         {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
 
