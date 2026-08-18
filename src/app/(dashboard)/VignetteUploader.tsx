@@ -1,52 +1,30 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { VignetteRow } from "@/lib/types";
-
-interface VignetteSetSummary {
-  id: string;
-  filename: string;
-  uploadedAt: string;
-  rowCount: number;
-}
+import { useEffect, useState } from "react";
+import { VignetteSet } from "@/lib/types";
+import { getVignetteSet, saveVignetteSet } from "@/lib/clientStorage";
 
 export default function VignetteUploader({
-  selectedId,
-  onSelect,
+  value,
+  onChange,
 }: {
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
+  value: VignetteSet | null;
+  onChange: (set: VignetteSet) => void;
 }) {
-  const [sets, setSets] = useState<VignetteSetSummary[]>([]);
-  const [rows, setRows] = useState<VignetteRow[] | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showReview, setShowReview] = useState(false);
 
-  const refreshSets = useCallback(() => {
-    fetch("/api/vignettes")
-      .then((r) => r.json())
-      .then(setSets);
+  // Pick up whatever was uploaded last time this browser was here — there's
+  // no server list to fetch from, just this one localStorage-backed set.
+  useEffect(() => {
+    if (!value) {
+      const stored = getVignetteSet();
+      if (stored) onChange(stored);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    refreshSets();
-  }, [refreshSets]);
-
-  useEffect(() => {
-    (async () => {
-      if (!selectedId) {
-        setRows(null);
-        setWarnings([]);
-        return;
-      }
-      const res = await fetch(`/api/vignettes/${selectedId}`);
-      const set = await res.json();
-      setRows(set.rows ?? null);
-      setWarnings([]);
-    })();
-  }, [selectedId]);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -56,12 +34,12 @@ export default function VignetteUploader({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/vignettes", { method: "POST", body: formData });
+      const res = await fetch("/api/vignettes/parse", { method: "POST", body: formData });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Upload failed.");
-      refreshSets();
-      onSelect(body.set.id);
-      setRows(body.set.rows);
+      const set: VignetteSet = { filename: body.filename, uploadedAt: body.uploadedAt, rows: body.rows };
+      saveVignetteSet(set);
+      onChange(set);
       setWarnings(body.warnings ?? []);
       setShowReview(true);
     } catch (err) {
@@ -88,26 +66,12 @@ export default function VignetteUploader({
         {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
 
-      {sets.length > 0 && (
-        <div>
-          <p className="mb-2 text-sm font-medium text-slate-700">Or use a previous upload:</p>
-          <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-            {sets.map((s) => (
-              <li key={s.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                <input
-                  type="radio"
-                  name="vignetteSet"
-                  checked={selectedId === s.id}
-                  onChange={() => onSelect(s.id)}
-                />
-                <span className="flex-1 font-medium text-slate-800">{s.filename}</span>
-                <span className="text-slate-500">
-                  {s.rowCount} rows · {new Date(s.uploadedAt).toLocaleString()}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {value && (
+        <p className="text-sm text-slate-600">
+          Currently loaded: <span className="font-medium text-slate-800">{value.filename}</span> —{" "}
+          {value.rows.length} rows, uploaded {new Date(value.uploadedAt).toLocaleString()}.{" "}
+          Uploading a new file replaces this.
+        </p>
       )}
 
       {warnings.length > 0 && (
@@ -118,13 +82,13 @@ export default function VignetteUploader({
         </div>
       )}
 
-      {rows && (
+      {value && (
         <div>
           <button
             onClick={() => setShowReview((s) => !s)}
             className="text-sm font-medium text-slate-700 underline"
           >
-            {showReview ? "Hide" : "Show"} review table ({rows.length} rows)
+            {showReview ? "Hide" : "Show"} review table ({value.rows.length} rows)
           </button>
           {showReview && (
             <div className="mt-2 max-h-96 overflow-auto rounded-lg border border-slate-200 bg-white">
@@ -141,7 +105,7 @@ export default function VignetteUploader({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => (
+                  {value.rows.map((row) => (
                     <tr key={row.vignette_id} className="border-t border-slate-100">
                       <td className="px-2 py-1 font-mono">{row.vignette_id}</td>
                       <td className="px-2 py-1">{row.domain}</td>

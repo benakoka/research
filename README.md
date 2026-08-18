@@ -14,10 +14,34 @@ The site holds no vignette data of its own — every run starts from an
 
 ## Stack
 
-Next.js (App Router) + TypeScript, deployed to Vercel. Persistence via
-Vercel KV (Upstash Redis under the hood — Vercel KV itself is deprecated in
-favor of installing a Redis integration directly, but the REST API and env
-vars are the same either way). OpenAI + Gemini calls happen server-side only.
+Next.js (App Router) + TypeScript, deployed to Vercel. **No database of any
+kind** — there's nothing to provision, and nothing costs money beyond the
+OpenAI/Gemini API usage itself. Settings, the uploaded vignette set, and
+in-progress runs all live in the browser's `localStorage`; the server is
+just Next.js API routes that call OpenAI/Gemini and hand results straight
+back (see "Where data lives," below). OpenAI + Gemini calls happen
+server-side only — the browser never sees an API key.
+
+## Where data lives
+
+Nothing here is written to a server database, on purpose — you download
+the output when a run is done, and that download is the only durable copy.
+Concretely:
+
+- **Settings** (model snapshots, prompt templates, word-count targets,
+  retry threshold, pricing) live in this browser's `localStorage`.
+- **The uploaded vignette set** and **in-progress runs** (Attribution
+  cells, Rewriting chains) also live in `localStorage`, so a page refresh
+  or closed tab doesn't lose your place mid-run.
+- **API routes are stateless transforms**: parse this file and hand back
+  rows; call the model for these cells and hand back results; format this
+  data as a CSV/XLSX. Nothing persists between requests server-side.
+
+The practical implications: everything is scoped to one browser on one
+machine (no "past runs" list, no syncing across devices), and clearing this
+browser's site data resets everything to defaults. Export a run before
+starting a new one or clearing your browser — starting a new run replaces
+the previous one in `localStorage`.
 
 ## Environment variables
 
@@ -25,11 +49,14 @@ vars are the same either way). OpenAI + Gemini calls happen server-side only.
 | --- | --- | --- |
 | `PASSWORD_HASH` | yes | Shared site password, hashed. Generate with `node scripts/hash-password.mjs "your password"` and paste the output. The plaintext password is never stored. |
 | `SESSION_SECRET` | yes | Long random string used to sign the session cookie (e.g. `openssl rand -hex 32`). |
-| `OPENAI_API_KEY` | yes, to use GPT | Server-side only, read directly from the environment — never stored in KV or sent to the client. |
+| `OPENAI_API_KEY` | yes, to use GPT | Server-side only, read directly from the environment — never stored anywhere, never sent to the client. |
 | `GEMINI_API_KEY` | yes, to use Gemini | Same as above. |
-| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | production | From a Vercel KV / Upstash Redis integration. Without these, the app falls back to a local JSON file (`.data/kv-store.json`, gitignored) so `npm run dev` works out of the box — **never used in production**, since serverless functions don't share a durable filesystem across invocations. |
 | `USE_CLAUDE_FOR_TESTING` | no | Test-mode only — see below. |
 | `ANTHROPIC_API_KEY` | test mode only | Used instead of the OpenAI/Gemini keys when `USE_CLAUDE_FOR_TESTING=true`. |
+
+That's the complete list — no `KV_REST_API_URL`/`KV_REST_API_TOKEN`, no
+database connection string, nothing to provision on Vercel beyond the
+project itself.
 
 ### Test mode (no OpenAI/Gemini budget yet)
 
@@ -48,18 +75,18 @@ through a small balance) into **both** model snapshot fields on the
 Settings screen; the Settings page shows a banner while test mode is
 active as a reminder. This is for pipeline testing only — Claude's
 output isn't a substitute for the real GPT/Gemini data the study is about.
-Delete any vignette sets/runs created in this mode once real keys are in,
-then unset `USE_CLAUDE_FOR_TESTING` and set `OPENAI_API_KEY` /
+Clear the test run from the Attribution/Rewriting page once real keys are
+in, then unset `USE_CLAUDE_FOR_TESTING` and set `OPENAI_API_KEY` /
 `GEMINI_API_KEY` — no code changes needed either way.
 
-API keys are operator-level secrets for this single-tenant tool (one shared
-password, one operator managing both provider accounts) — they live in
-Vercel env vars, not the Settings screen, so rotating a key never touches
-the app's data store. The Settings screen shows whether each key is
-currently configured (masked), but they're only changed via env vars.
-Model snapshot strings are still a Settings-screen field, since those you'll
-plausibly want to change per run — there's no hardcoded fallback for them
-by design (see the build spec, §7).
+API keys are operator-level secrets (one shared password, one operator
+managing both provider accounts) — they live in Vercel env vars, not
+`localStorage`, so rotating a key never touches anything in the browser.
+The Settings screen shows whether each key is currently configured
+(masked), but they're only changed via env vars. Model snapshot strings are
+a Settings-screen field, since those you'll plausibly want to change per
+run — there's no hardcoded fallback for them by design (see the build
+spec, §7).
 
 ## Local development
 
@@ -87,11 +114,11 @@ model snapshot strings on the Settings screen before running either module.
 ## Deploying to Vercel
 
 1. Push this repo to Vercel.
-2. Add a Redis/KV integration (Storage tab → Redis) — it sets
-   `KV_REST_API_URL` / `KV_REST_API_TOKEN` automatically.
-3. Set `PASSWORD_HASH`, `SESSION_SECRET`, `OPENAI_API_KEY`, and
+2. Set `PASSWORD_HASH`, `SESSION_SECRET`, `OPENAI_API_KEY`, and
    `GEMINI_API_KEY` in the project's Environment Variables.
-4. Deploy. Log in, then fill in model snapshots on Settings.
+3. Deploy. Log in, then fill in model snapshots on Settings.
+
+No Storage integration, no database — that's the whole setup.
 
 The app ships `robots.txt` (disallow-all) and a `noindex` meta tag as a
 belt-and-suspenders alongside the password gate — it's not meant to be
@@ -124,10 +151,13 @@ from the other columns — don't type it by hand.
 - Rewriting's automatic retry-on-miss threshold (default 25%) is a Settings
   constant, not a hardcoded value.
 - There is no spending cap — Settings shows a running call-count / rough
-  cost estimate (using $/1M-token pricing you enter there); manage budget
-  limits directly in the OpenAI/Google billing dashboards.
-- Batch processing for both modules works by the client repeatedly calling a
-  `/process` endpoint that advances a small, rate-limit-friendly batch of
-  pending work and returns — this keeps each serverless invocation short
-  while still supporting 100+ call runs, live progress, and re-running a
-  single failed cell/generation without restarting the batch.
+  cost estimate (using $/1M-token pricing you enter there, accumulated in
+  this browser); manage budget limits directly in the OpenAI/Google
+  billing dashboards.
+- Batch processing for both modules works by the client (which holds the
+  run's cells/chains in React state + localStorage) repeatedly calling a
+  stateless `/process` endpoint with the next small batch of pending work,
+  merging the results back into local state, and looping until done. This
+  keeps each serverless invocation short while still supporting 100+ call
+  runs, live progress, and re-running a single failed cell/generation
+  without restarting the batch — all without a server-side store.

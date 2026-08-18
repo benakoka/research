@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { AttributionCell, VignetteSet } from "@/lib/types";
+import { AttributionCell } from "@/lib/types";
 import { toCsv } from "@/lib/csv";
 
 const LONG_HEADERS = [
@@ -71,12 +71,7 @@ function average(values: number[]): number | null {
  * each model/direction cell is averaged across reps rather than silently
  * dropping data (§3) — repCount > 1 is flagged separately in the run UI.
  */
-export function buildAttributionWideWorkbook(
-  cells: AttributionCell[],
-  vignetteSet: VignetteSet
-): ExcelJS.Workbook {
-  const textById = new Map(vignetteSet.rows.map((r) => [r.vignette_id, r.vignette_text]));
-
+export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.Workbook {
   const byVignette = new Map<string, AttributionCell[]>();
   for (const c of cells) {
     if (!byVignette.has(c.vignette_id)) byVignette.set(c.vignette_id, []);
@@ -112,7 +107,7 @@ export function buildAttributionWideWorkbook(
       first.order_variant,
       first.female_name,
       first.male_name,
-      textById.get(vignetteId) ?? "",
+      first.vignette_text,
       gptWoman,
       gptMan,
       gptNet,

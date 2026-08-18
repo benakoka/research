@@ -1,58 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSettings, saveSettings, getUsage } from "@/lib/store";
+import { NextResponse } from "next/server";
 import { maskSecret } from "@/lib/mask";
-import { summarizeCost } from "@/lib/cost";
 import { getApiKey, isTestMode } from "@/lib/apiKeys";
 import { withApiErrorHandling } from "@/lib/apiError";
-import { Settings } from "@/lib/types";
 
+// The only settings that ever touch the server are the API-key secrets
+// (env vars) — everything else (model snapshots, prompt templates,
+// defaults, pricing) lives in the browser's localStorage and never leaves
+// the client except as request payloads to /api/attribution/process etc.
+// This route just reports whether a key is configured, masked.
 export const GET = withApiErrorHandling(async () => {
-  const settings = await getSettings();
-  const usage = await getUsage();
-  const costs = summarizeCost(usage, settings);
-
   return NextResponse.json({
-    ...settings,
-    // API keys are Vercel env vars (OPENAI_API_KEY / GEMINI_API_KEY), not
-    // Settings-screen fields — read-only here, never editable via this API.
-    openaiApiKeyMasked: maskSecret(getApiKey("GPT")),
-    geminiApiKeyMasked: maskSecret(getApiKey("Gemini")),
-    testMode: isTestMode(),
-    usage,
-    costs,
-  });
-});
-
-export const POST = withApiErrorHandling(async (req: NextRequest) => {
-  let body: Partial<Settings>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const patch: Partial<Settings> = {};
-  const passthroughFields: (keyof Settings)[] = [
-    "gptModelSnapshot",
-    "geminiModelSnapshot",
-    "attributionPromptTemplate",
-    "rewritingPromptTemplate",
-    "defaultRepCount",
-    "defaultWordCountTargets",
-    "retryThresholdFraction",
-    "gptPricing",
-    "geminiPricing",
-  ];
-  for (const field of passthroughFields) {
-    if (body[field] !== undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (patch as any)[field] = body[field];
-    }
-  }
-
-  const saved = await saveSettings(patch);
-  return NextResponse.json({
-    ...saved,
     openaiApiKeyMasked: maskSecret(getApiKey("GPT")),
     geminiApiKeyMasked: maskSecret(getApiKey("Gemini")),
     testMode: isTestMode(),

@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { CostSummary } from "@/lib/cost";
+import { CostSummary, summarizeCost } from "@/lib/cost";
+import { getSettings, getUsage } from "@/lib/clientStorage";
 
 const links = [
   { href: "/", label: "Home" },
@@ -16,9 +18,23 @@ function fmtCost(c: number | null) {
   return `$${c.toFixed(2)}`;
 }
 
-export default function NavClient({ costs }: { costs: CostSummary[] }) {
+export default function NavClient() {
   const pathname = usePathname();
   const router = useRouter();
+  const [costs, setCosts] = useState<CostSummary[]>([]);
+
+  useEffect(() => {
+    function refresh() {
+      setCosts(summarizeCost(getUsage(), getSettings()));
+    }
+    refresh();
+    // The layout stays mounted across client-side navigations, so this
+    // polls to stay roughly current with usage accumulating on the
+    // Attribution/Rewriting pages (a same-tab localStorage write doesn't
+    // fire the `storage` event, only cross-tab writes do).
+    const interval = setInterval(refresh, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });

@@ -1,12 +1,14 @@
+// Pure logic only — no server secrets, no fetch calls. Safe to import from
+// client components (e.g. to build a run's initial cells before sending
+// batches to /api/attribution/process) as well as from API routes. The
+// model-calling half of this lives in lib/attributionExec.ts, which is
+// server-only.
 import {
   AttributionCell,
-  AttributionRun,
   ScaleDirection,
   VignetteRow,
   ModelProvider,
 } from "./types";
-import { callModel, ModelCallError } from "./models";
-import { getApiKey } from "./apiKeys";
 
 const MODELS: ModelProvider[] = ["GPT", "Gemini"];
 const DIRECTIONS: ScaleDirection[] = ["as_written", "flipped"];
@@ -79,6 +81,7 @@ export function buildAttributionCells(
             order_variant: row.order_variant,
             female_name: row.female_name,
             male_name: row.male_name,
+            vignette_text: row.vignette_text,
             scale_direction: direction,
             plus50_name: femaleSlotName,
             minus50_name: maleSlotName,
@@ -97,39 +100,4 @@ export function buildAttributionCells(
     }
   }
   return cells;
-}
-
-/** Executes one cell: builds the prompt, calls the model, parses the rating. */
-export async function executeAttributionCell(
-  run: AttributionRun,
-  cell: AttributionCell,
-  row: VignetteRow
-): Promise<AttributionCell> {
-  const apiKey = getApiKey(cell.model);
-
-  const filledPrompt = buildAttributionPrompt(run.promptTemplate, cell.plus50_name, cell.minus50_name);
-  // Story sent alongside the filled prompt in one message (§3).
-  const combined = `${row.vignette_text}\n\n${filledPrompt}`;
-
-  try {
-    const result = await callModel(cell.model, apiKey, cell.model_snapshot, combined);
-    const { rating, parseError } = parseRating(result.text);
-    return {
-      ...cell,
-      status: "done",
-      rating,
-      raw_response: result.text,
-      parse_error: parseError,
-      error: null,
-      timestamp: new Date().toISOString(),
-    };
-  } catch (err) {
-    const message = err instanceof ModelCallError ? err.message : "Unknown error.";
-    return {
-      ...cell,
-      status: "error",
-      error: message,
-      timestamp: new Date().toISOString(),
-    };
-  }
 }

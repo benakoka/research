@@ -82,7 +82,6 @@ export interface VignetteRow {
 }
 
 export interface VignetteSet {
-  id: string;
   filename: string;
   uploadedAt: string;
   rows: VignetteRow[];
@@ -104,6 +103,11 @@ export interface AttributionCell {
   order_variant: OrderVariant;
   female_name: string;
   male_name: string;
+  // Denormalized onto the cell (rather than looked up server-side by
+  // vignette_id) because there's no server-side store to look it up from —
+  // every API call is a stateless transform over exactly what the client
+  // sends (see lib/apiKeys.ts / api routes under /api/attribution).
+  vignette_text: string;
   scale_direction: ScaleDirection;
   plus50_name: string;
   minus50_name: string;
@@ -120,13 +124,16 @@ export interface AttributionCell {
 
 export interface AttributionRun {
   id: string;
-  vignetteSetId: string;
   createdAt: string;
   promptTemplate: string;
   repCount: number;
   gptModelSnapshot: string;
   geminiModelSnapshot: string;
-  cellIds: string[];
+  vignetteSetFilename: string;
+  // Inline, not a list of ids into a server store — the run *is* its cells.
+  // Persisted client-side (localStorage) only; nothing here ever reaches a
+  // database, so "download the output" is the only durable copy.
+  cells: AttributionCell[];
   status: "pending" | "running" | "done";
 }
 
@@ -164,13 +171,14 @@ export interface RewritingChain {
 
 export interface RewritingRun {
   id: string;
-  vignetteSetId: string;
   createdAt: string;
   promptTemplate: string;
   gptModelSnapshot: string;
   geminiModelSnapshot: string;
   retryThresholdFraction: number;
-  chainIds: string[];
+  vignetteSetFilename: string;
+  // Inline, same reasoning as AttributionRun.cells above.
+  chains: RewritingChain[];
   status: "pending" | "running" | "done";
 }
 

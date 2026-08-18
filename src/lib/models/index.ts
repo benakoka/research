@@ -2,7 +2,6 @@ import { callOpenAI } from "./openai";
 import { callGemini } from "./gemini";
 import { callAnthropic } from "./anthropic";
 import { ModelCallResult, ModelCallError } from "./types";
-import { recordUsage } from "@/lib/store";
 import { ModelProvider } from "@/lib/types";
 import { isTestMode } from "@/lib/apiKeys";
 
@@ -18,9 +17,11 @@ function sleep(ms: number) {
 
 /**
  * Calls the given model provider with retry + exponential backoff on
- * rate-limit/5xx errors (§5). Records usage for the cost-visibility display
- * on every successful call. Throws ModelCallError on final failure so the
- * caller can store it as a per-cell error rather than crashing the batch.
+ * rate-limit/5xx errors (§5). Returns per-call token usage on the result so
+ * the caller (an API route) can hand it back to the client for the
+ * cost-visibility display — there's no server-side store to accumulate it
+ * in. Throws ModelCallError on final failure so the caller can store it as
+ * a per-cell error rather than crashing the batch.
  */
 export async function callModel(
   provider: ModelProvider,
@@ -53,7 +54,6 @@ export async function callModel(
         : provider === "GPT"
           ? await callOpenAI(apiKey, modelSnapshot, prompt)
           : await callGemini(apiKey, modelSnapshot, prompt);
-      await recordUsage(provider, result.usage.inputTokens, result.usage.outputTokens);
       return result;
     } catch (err) {
       lastError = err;

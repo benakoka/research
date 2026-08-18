@@ -1,22 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CostSummary } from "@/lib/cost";
+import { getSettings, saveSettings, getUsage } from "@/lib/clientStorage";
+import { summarizeCost, CostSummary } from "@/lib/cost";
+import { Settings } from "@/lib/types";
 
-interface SettingsResponse {
+interface KeyStatus {
   openaiApiKeyMasked: string | null;
   geminiApiKeyMasked: string | null;
   testMode: boolean;
-  gptModelSnapshot: string;
-  geminiModelSnapshot: string;
-  attributionPromptTemplate: string;
-  rewritingPromptTemplate: string;
-  defaultRepCount: number;
-  defaultWordCountTargets: [number, number, number, number, number];
-  retryThresholdFraction: number;
-  gptPricing: { inputPerMillion: number; outputPerMillion: number };
-  geminiPricing: { inputPerMillion: number; outputPerMillion: number };
-  costs: CostSummary[];
 }
 
 function Field({
@@ -41,60 +33,39 @@ const inputClass =
   "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500";
 
 export default function SettingsPage() {
-  const [data, setData] = useState<SettingsResponse | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [data, setData] = useState<Settings | null>(null);
+  const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
+  const [costs, setCosts] = useState<CostSummary[]>([]);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then(setData);
+    (async () => {
+      const settings = getSettings();
+      setData(settings);
+      setCosts(summarizeCost(getUsage(), settings));
+      try {
+        const res = await fetch("/api/settings");
+        setKeyStatus(await res.json());
+      } catch {
+        setError("Couldn't reach the server to check API key status.");
+      }
+    })();
   }, []);
 
   if (!data) {
     return <p className="text-sm text-slate-500">Loading…</p>;
   }
 
-  async function save(patch: Record<string, unknown>) {
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "Save failed.");
-      }
-      const updated = await res.json();
-      setData((prev) => (prev ? { ...prev, ...updated } : updated));
-      setSavedAt(Date.now());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   function saveAll() {
     if (!data) return;
-    save({
-      gptModelSnapshot: data.gptModelSnapshot,
-      geminiModelSnapshot: data.geminiModelSnapshot,
-      attributionPromptTemplate: data.attributionPromptTemplate,
-      rewritingPromptTemplate: data.rewritingPromptTemplate,
-      defaultRepCount: data.defaultRepCount,
-      defaultWordCountTargets: data.defaultWordCountTargets,
-      retryThresholdFraction: data.retryThresholdFraction,
-      gptPricing: data.gptPricing,
-      geminiPricing: data.geminiPricing,
-    });
+    const saved = saveSettings(data);
+    setData(saved);
+    setCosts(summarizeCost(getUsage(), saved));
+    setSavedAt(Date.now());
   }
 
-  function update<K extends keyof SettingsResponse>(key: K, value: SettingsResponse[K]) {
+  function update<K extends keyof Settings>(key: K, value: Settings[K]) {
     setData((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
@@ -103,20 +74,21 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Settings</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Editable at any time. Nothing here is hardcoded into the app logic —
-          these values drive every call made by both modules.
+          Editable at any time. Everything below lives in this browser&apos;s
+          localStorage, not a server database — there&apos;s nothing to save
+          anywhere else. Clearing this browser&apos;s data resets it back to
+          defaults.
         </p>
       </div>
 
-      {data.testMode && (
+      {keyStatus?.testMode && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
           ⚠ <strong>Test mode is on</strong> (<code>USE_CLAUDE_FOR_TESTING=true</code>).
           Both the &quot;GPT&quot; and &quot;Gemini&quot; slots below are actually calling
           Claude via <code>ANTHROPIC_API_KEY</code> — type a real Claude model ID (e.g.{" "}
           <code>claude-haiku-4-5-20251001</code>) into both model snapshot fields for this
           to work. This is for exercising the upload → run → export pipeline only — Claude
-          output is not a substitute for real GPT/Gemini data. Delete any runs made in this
-          mode once real keys are in, and unset <code>USE_CLAUDE_FOR_TESTING</code>.
+          output is not a substitute for real GPT/Gemini data.
         </div>
       )}
 
@@ -125,27 +97,26 @@ export default function SettingsPage() {
         <p className="mb-4 text-xs text-slate-500">
           Set as Vercel environment variables (<code>OPENAI_API_KEY</code>,{" "}
           <code>GEMINI_API_KEY</code>) rather than here — they&apos;re
-          operator-level secrets for this single-tenant tool, not per-run
-          configuration, and this keeps them out of the app&apos;s data store
-          entirely. Change them from the Vercel project settings (or{" "}
-          <code>.env.local</code> for local dev); this screen just shows
-          whether one is currently configured.
+          operator-level secrets, not per-run configuration, and this keeps
+          them out of any browser storage entirely. Change them from the
+          Vercel project settings (or <code>.env.local</code> for local
+          dev); this screen just shows whether one is currently configured.
         </p>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div className="rounded-md bg-slate-50 p-3">
             <div className="font-medium text-slate-700">OpenAI</div>
             <div className="text-slate-600">
-              {data.openaiApiKeyMasked ? `Configured (${data.openaiApiKeyMasked})` : "Not set"}
+              {keyStatus?.openaiApiKeyMasked ? `Configured (${keyStatus.openaiApiKeyMasked})` : "Not set"}
             </div>
           </div>
           <div className="rounded-md bg-slate-50 p-3">
             <div className="font-medium text-slate-700">Gemini</div>
             <div className="text-slate-600">
-              {data.geminiApiKeyMasked ? `Configured (${data.geminiApiKeyMasked})` : "Not set"}
+              {keyStatus?.geminiApiKeyMasked ? `Configured (${keyStatus.geminiApiKeyMasked})` : "Not set"}
             </div>
           </div>
         </div>
-        {data.testMode && (
+        {keyStatus?.testMode && (
           <p className="mt-3 text-xs text-amber-700">
             Test mode is on, so both cards above actually reflect{" "}
             <code>ANTHROPIC_API_KEY</code>, not the OpenAI/Gemini keys.
@@ -258,34 +229,22 @@ export default function SettingsPage() {
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-4 font-semibold text-slate-900">Cost visibility</h2>
         <p className="mb-4 text-xs text-slate-500">
-          Rough running estimate only — there is no spending cap in this app.
+          Rough running estimate only, accumulated in this browser across
+          every batch it has run — there is no spending cap in this app.
           Manage budget limits directly in the OpenAI/Google billing
           platforms. Enter $/1M token pricing below to see a dollar estimate;
           call counts are always shown regardless.
         </p>
         <div className="mb-4 grid grid-cols-2 gap-4">
-          <div className="rounded-md bg-slate-50 p-3 text-sm">
-            <div className="font-mono font-medium">GPT</div>
-            {data.costs
-              .filter((c) => c.model === "GPT")
-              .map((c) => (
-                <div key={c.model} className="text-slate-600">
-                  {c.calls} calls · {c.inputTokens.toLocaleString()} in / {c.outputTokens.toLocaleString()} out tok
-                  {c.estimatedCostUsd !== null && ` · ~$${c.estimatedCostUsd.toFixed(2)}`}
-                </div>
-              ))}
-          </div>
-          <div className="rounded-md bg-slate-50 p-3 text-sm">
-            <div className="font-mono font-medium">Gemini</div>
-            {data.costs
-              .filter((c) => c.model === "Gemini")
-              .map((c) => (
-                <div key={c.model} className="text-slate-600">
-                  {c.calls} calls · {c.inputTokens.toLocaleString()} in / {c.outputTokens.toLocaleString()} out tok
-                  {c.estimatedCostUsd !== null && ` · ~$${c.estimatedCostUsd.toFixed(2)}`}
-                </div>
-              ))}
-          </div>
+          {costs.map((c) => (
+            <div key={c.model} className="rounded-md bg-slate-50 p-3 text-sm">
+              <div className="font-mono font-medium">{c.model}</div>
+              <div className="text-slate-600">
+                {c.calls} calls · {c.inputTokens.toLocaleString()} in / {c.outputTokens.toLocaleString()} out tok
+                {c.estimatedCostUsd !== null && ` · ~$${c.estimatedCostUsd.toFixed(2)}`}
+              </div>
+            </div>
+          ))}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -342,10 +301,9 @@ export default function SettingsPage() {
       <div className="flex items-center gap-3">
         <button
           onClick={saveAll}
-          disabled={saving}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
         >
-          {saving ? "Saving…" : "Save settings"}
+          Save settings
         </button>
         {savedAt && <span className="text-xs text-slate-500">Saved.</span>}
       </div>

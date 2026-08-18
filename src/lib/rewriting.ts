@@ -1,13 +1,13 @@
+// Pure logic only — no server secrets, no fetch calls. Safe to import from
+// client components as well as API routes. The model-calling half of this
+// lives in lib/rewritingExec.ts, which is server-only.
 import {
   RewritingChain,
-  RewritingRun,
   RewritingGeneration,
   VignetteRow,
   ModelProvider,
 } from "./types";
-import { callModel, ModelCallError } from "./models";
-import { countWords, missesTarget } from "./wordcount";
-import { getApiKey } from "./apiKeys";
+import { countWords } from "./wordcount";
 
 const MODELS: ModelProvider[] = ["GPT", "Gemini"];
 
@@ -97,64 +97,4 @@ export function nextRunnableGenerationIndex(chain: RewritingChain): number | nul
     return null; // blocked on a running/errored earlier generation
   }
   return null; // all done
-}
-
-/** Executes one generation: builds the prompt from the previous generation's output, calls the model, retries once on a large word-count miss (§4). */
-export async function executeGeneration(
-  run: RewritingRun,
-  chain: RewritingChain,
-  genIndex: number
-): Promise<RewritingGeneration> {
-  const apiKey = getApiKey(chain.model);
-  const target = chain.wordCountTargets[genIndex - 1];
-  const inputText = chain.generations[genIndex - 1].text;
-  const prompt = buildRewritingPrompt(run.promptTemplate, target);
-  const combined = `${prompt}\n\n${inputText}`;
-
-  try {
-    const first = await callModel(chain.model, apiKey, chain.model_snapshot, combined);
-    const firstWordCount = countWords(first.text);
-
-    if (missesTarget(firstWordCount, target, run.retryThresholdFraction)) {
-      // Retry once automatically on a large miss — keep the first attempt's
-      // data rather than discarding it, it's compliance data too (§4).
-      const retry = await callModel(chain.model, apiKey, chain.model_snapshot, combined);
-      const retryWordCount = countWords(retry.text);
-      return {
-        generation: genIndex,
-        text: retry.text,
-        target_word_count: target,
-        actual_word_count: retryWordCount,
-        status: "done",
-        retried: true,
-        first_attempt_text: first.text,
-        first_attempt_word_count: firstWordCount,
-        raw_response: retry.text,
-        error: null,
-        timestamp: new Date().toISOString(),
-      };
-    }
-
-    return {
-      generation: genIndex,
-      text: first.text,
-      target_word_count: target,
-      actual_word_count: firstWordCount,
-      status: "done",
-      retried: false,
-      first_attempt_text: null,
-      first_attempt_word_count: null,
-      raw_response: first.text,
-      error: null,
-      timestamp: new Date().toISOString(),
-    };
-  } catch (err) {
-    const message = err instanceof ModelCallError ? err.message : "Unknown error.";
-    return {
-      ...chain.generations[genIndex],
-      status: "error",
-      error: message,
-      timestamp: new Date().toISOString(),
-    };
-  }
 }
