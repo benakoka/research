@@ -31,11 +31,23 @@ function Field({
 const inputClass =
   "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500";
 
+// Cheapest current Claude model — good for stretching a small test-mode
+// budget across a lot of calls. Only surfaced as a suggestion when test
+// mode is on; not used anywhere by default.
+const SUGGESTED_TEST_MODEL = "claude-haiku-4-5-20251001";
+
 export default function SettingsPage() {
   const [data, setData] = useState<Settings | null>(null);
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function copySuggestedModel() {
+    await navigator.clipboard.writeText(SUGGESTED_TEST_MODEL);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   useEffect(() => {
     (async () => {
@@ -126,6 +138,20 @@ export default function SettingsPage() {
           Free text, used for every API call in both modules. There is no
           default baked in — flagship versions cycle too often for that.
         </p>
+        {keyStatus?.testMode && (
+          <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+            <span>
+              Test mode suggestion — paste this into both fields below:{" "}
+              <code className="rounded bg-white px-1.5 py-0.5">{SUGGESTED_TEST_MODEL}</code>
+            </span>
+            <button
+              onClick={copySuggestedModel}
+              className="ml-auto shrink-0 rounded-md border border-amber-400 bg-white px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
+        )}
         <Field label="GPT model snapshot" hint="e.g. gpt-5.2">
           <input
             value={data.gptModelSnapshot}
