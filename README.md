@@ -28,6 +28,29 @@ vars are the same either way). OpenAI + Gemini calls happen server-side only.
 | `OPENAI_API_KEY` | yes, to use GPT | Server-side only, read directly from the environment — never stored in KV or sent to the client. |
 | `GEMINI_API_KEY` | yes, to use Gemini | Same as above. |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | production | From a Vercel KV / Upstash Redis integration. Without these, the app falls back to a local JSON file (`.data/kv-store.json`, gitignored) so `npm run dev` works out of the box — **never used in production**, since serverless functions don't share a durable filesystem across invocations. |
+| `USE_CLAUDE_FOR_TESTING` | no | Test-mode only — see below. |
+| `ANTHROPIC_API_KEY` | test mode only | Used instead of the OpenAI/Gemini keys when `USE_CLAUDE_FOR_TESTING=true`. |
+
+### Test mode (no OpenAI/Gemini budget yet)
+
+If you want to exercise the pipeline — upload, batch runs, retries, exports —
+before real OpenAI/Gemini budget is available, set:
+
+```
+USE_CLAUDE_FOR_TESTING=true
+ANTHROPIC_API_KEY=<your Anthropic console key>
+```
+
+With this on, both the "GPT" and "Gemini" slots route through Claude on that
+one key instead. Type a real Claude model ID (e.g.
+`claude-haiku-4-5-20251001` — cheapest current model, good for burning
+through a small balance) into **both** model snapshot fields on the
+Settings screen; the Settings page shows a banner while test mode is
+active as a reminder. This is for pipeline testing only — Claude's
+output isn't a substitute for the real GPT/Gemini data the study is about.
+Delete any vignette sets/runs created in this mode once real keys are in,
+then unset `USE_CLAUDE_FOR_TESTING` and set `OPENAI_API_KEY` /
+`GEMINI_API_KEY` — no code changes needed either way.
 
 API keys are operator-level secrets for this single-tenant tool (one shared
 password, one operator managing both provider accounts) — they live in

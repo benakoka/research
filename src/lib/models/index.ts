@@ -1,8 +1,10 @@
 import { callOpenAI } from "./openai";
 import { callGemini } from "./gemini";
+import { callAnthropic } from "./anthropic";
 import { ModelCallResult, ModelCallError } from "./types";
 import { recordUsage } from "@/lib/store";
 import { ModelProvider } from "@/lib/types";
+import { isTestMode } from "@/lib/apiKeys";
 
 export { ModelCallError };
 export type { ModelCallResult };
@@ -42,8 +44,13 @@ export async function callModel(
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const result =
-        provider === "GPT"
+      // TEST MODE: both providers route through Claude on one Anthropic key
+      // so the pipeline can be exercised before real OpenAI/Gemini budget
+      // exists. Swapping this off (unset USE_CLAUDE_FOR_TESTING) restores
+      // the normal GPT/Gemini dispatch with no other code changes needed.
+      const result = isTestMode()
+        ? await callAnthropic(apiKey, modelSnapshot, prompt)
+        : provider === "GPT"
           ? await callOpenAI(apiKey, modelSnapshot, prompt)
           : await callGemini(apiKey, modelSnapshot, prompt);
       await recordUsage(provider, result.usage.inputTokens, result.usage.outputTokens);

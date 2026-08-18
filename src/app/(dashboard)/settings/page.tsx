@@ -6,6 +6,7 @@ import { CostSummary } from "@/lib/cost";
 interface SettingsResponse {
   openaiApiKeyMasked: string | null;
   geminiApiKeyMasked: string | null;
+  testMode: boolean;
   gptModelSnapshot: string;
   geminiModelSnapshot: string;
   attributionPromptTemplate: string;
@@ -107,6 +108,18 @@ export default function SettingsPage() {
         </p>
       </div>
 
+      {data.testMode && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          ⚠ <strong>Test mode is on</strong> (<code>USE_CLAUDE_FOR_TESTING=true</code>).
+          Both the &quot;GPT&quot; and &quot;Gemini&quot; slots below are actually calling
+          Claude via <code>ANTHROPIC_API_KEY</code> — type a real Claude model ID (e.g.{" "}
+          <code>claude-haiku-4-5-20251001</code>) into both model snapshot fields for this
+          to work. This is for exercising the upload → run → export pipeline only — Claude
+          output is not a substitute for real GPT/Gemini data. Delete any runs made in this
+          mode once real keys are in, and unset <code>USE_CLAUDE_FOR_TESTING</code>.
+        </div>
+      )}
+
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-4 font-semibold text-slate-900">API keys</h2>
         <p className="mb-4 text-xs text-slate-500">
@@ -132,6 +145,12 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+        {data.testMode && (
+          <p className="mt-3 text-xs text-amber-700">
+            Test mode is on, so both cards above actually reflect{" "}
+            <code>ANTHROPIC_API_KEY</code>, not the OpenAI/Gemini keys.
+          </p>
+        )}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6">

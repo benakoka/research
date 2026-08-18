@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSettings, saveSettings, getUsage } from "@/lib/store";
 import { maskSecret } from "@/lib/mask";
 import { summarizeCost } from "@/lib/cost";
-import { getApiKey } from "@/lib/apiKeys";
+import { getApiKey, isTestMode } from "@/lib/apiKeys";
 import { Settings } from "@/lib/types";
 
 export async function GET() {
@@ -16,6 +16,7 @@ export async function GET() {
     // Settings-screen fields — read-only here, never editable via this API.
     openaiApiKeyMasked: maskSecret(getApiKey("GPT")),
     geminiApiKeyMasked: maskSecret(getApiKey("Gemini")),
+    testMode: isTestMode(),
     usage,
     costs,
   });
@@ -53,5 +54,6 @@ export async function POST(req: NextRequest) {
     ...saved,
     openaiApiKeyMasked: maskSecret(getApiKey("GPT")),
     geminiApiKeyMasked: maskSecret(getApiKey("Gemini")),
+    testMode: isTestMode(),
   });
 }
