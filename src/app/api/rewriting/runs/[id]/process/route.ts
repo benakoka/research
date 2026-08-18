@@ -4,9 +4,8 @@ import {
   getRewritingChains,
   saveRewritingChain,
   saveRewritingRun,
-  getSettings,
 } from "@/lib/store";
-import { executeGeneration, nextRunnableGenerationIndex, apiKeyForModel } from "@/lib/rewriting";
+import { executeGeneration, nextRunnableGenerationIndex } from "@/lib/rewriting";
 import { summarizeProgress } from "@/lib/progress";
 import { RewritingChain } from "@/lib/types";
 
@@ -30,7 +29,6 @@ export async function POST(
   const run = await getRewritingRun(id);
   if (!run) return NextResponse.json({ error: "Run not found." }, { status: 404 });
 
-  const settings = await getSettings();
   const chains = await getRewritingChains(run);
 
   const runnable = chains
@@ -64,8 +62,7 @@ export async function POST(
 
   await Promise.all(
     runnable.map(async ({ chain, genIndex }) => {
-      const apiKey = apiKeyForModel(settings, chain.model);
-      const result = await executeGeneration(run, chain, genIndex, apiKey);
+      const result = await executeGeneration(run, chain, genIndex);
       const gens = [...chain.generations];
       gens[genIndex] = result;
       const updated = { ...chain, generations: gens };

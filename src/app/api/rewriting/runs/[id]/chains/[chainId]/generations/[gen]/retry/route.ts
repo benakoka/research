@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRewritingRun, getRewritingChain, saveRewritingChain, getSettings } from "@/lib/store";
-import { executeGeneration, apiKeyForModel } from "@/lib/rewriting";
+import { getRewritingRun, getRewritingChain, saveRewritingChain } from "@/lib/store";
+import { executeGeneration } from "@/lib/rewriting";
 
 // Allows re-running a single failed/miscompliant generation without
 // restarting the whole chain (§5). Re-running generation N re-derives its
@@ -28,14 +28,11 @@ export async function POST(
     );
   }
 
-  const settings = await getSettings();
-  const apiKey = apiKeyForModel(settings, chain.model);
-
   const gens = [...chain.generations];
   gens[genIndex] = { ...gens[genIndex], status: "running" };
   await saveRewritingChain(run.id, { ...chain, generations: gens, status: "running" });
 
-  const result = await executeGeneration(run, chain, genIndex, apiKey);
+  const result = await executeGeneration(run, chain, genIndex);
   const finalGens = [...gens];
   finalGens[genIndex] = result;
   const status = finalGens[5].status === "done" ? "done" : "running";

@@ -11,10 +11,6 @@ export interface ModelPricing {
 }
 
 export interface Settings {
-  // API keys — stored server-side only, never echoed back in full (see api/settings masking).
-  openaiApiKey: string;
-  geminiApiKey: string;
-
   // Model snapshot strings, e.g. "gpt-5.2", "gemini-3-pro". Free text, no hardcoded fallback.
   gptModelSnapshot: string;
   geminiModelSnapshot: string;
@@ -53,8 +49,6 @@ both characters's names exactly as they appear in the original. Return only the
 rewritten passage.`;
 
 export const DEFAULT_SETTINGS: Settings = {
-  openaiApiKey: "",
-  geminiApiKey: "",
   gptModelSnapshot: "",
   geminiModelSnapshot: "",
   attributionPromptTemplate: DEFAULT_ATTRIBUTION_PROMPT,

@@ -4,10 +4,10 @@ import {
   RewritingGeneration,
   VignetteRow,
   ModelProvider,
-  Settings,
 } from "./types";
 import { callModel, ModelCallError } from "./models";
 import { countWords, missesTarget } from "./wordcount";
+import { getApiKey } from "./apiKeys";
 
 const MODELS: ModelProvider[] = ["GPT", "Gemini"];
 
@@ -103,9 +103,9 @@ export function nextRunnableGenerationIndex(chain: RewritingChain): number | nul
 export async function executeGeneration(
   run: RewritingRun,
   chain: RewritingChain,
-  genIndex: number,
-  apiKey: string
+  genIndex: number
 ): Promise<RewritingGeneration> {
+  const apiKey = getApiKey(chain.model);
   const target = chain.wordCountTargets[genIndex - 1];
   const inputText = chain.generations[genIndex - 1].text;
   const prompt = buildRewritingPrompt(run.promptTemplate, target);
@@ -157,8 +157,4 @@ export async function executeGeneration(
       timestamp: new Date().toISOString(),
     };
   }
-}
-
-export function apiKeyForModel(settings: Settings, model: ModelProvider): string {
-  return model === "GPT" ? settings.openaiApiKey : settings.geminiApiKey;
 }

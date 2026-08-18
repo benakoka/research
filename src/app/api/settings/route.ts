@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSettings, saveSettings, getUsage } from "@/lib/store";
 import { maskSecret } from "@/lib/mask";
 import { summarizeCost } from "@/lib/cost";
+import { getApiKey } from "@/lib/apiKeys";
 import { Settings } from "@/lib/types";
 
 export async function GET() {
@@ -9,28 +10,19 @@ export async function GET() {
   const usage = await getUsage();
   const costs = summarizeCost(usage, settings);
 
-  const { openaiApiKey, geminiApiKey, ...rest } = settings;
   return NextResponse.json({
-    ...rest,
-    openaiApiKeyMasked: maskSecret(openaiApiKey),
-    geminiApiKeyMasked: maskSecret(geminiApiKey),
+    ...settings,
+    // API keys are Vercel env vars (OPENAI_API_KEY / GEMINI_API_KEY), not
+    // Settings-screen fields — read-only here, never editable via this API.
+    openaiApiKeyMasked: maskSecret(getApiKey("GPT")),
+    geminiApiKeyMasked: maskSecret(getApiKey("Gemini")),
     usage,
     costs,
   });
 }
 
-interface SettingsPatchBody
-  extends Partial<
-    Omit<Settings, "openaiApiKey" | "geminiApiKey">
-  > {
-  openaiApiKey?: string;
-  geminiApiKey?: string;
-  clearOpenaiApiKey?: boolean;
-  clearGeminiApiKey?: boolean;
-}
-
 export async function POST(req: NextRequest) {
-  let body: SettingsPatchBody;
+  let body: Partial<Settings>;
   try {
     body = await req.json();
   } catch {
@@ -38,19 +30,6 @@ export async function POST(req: NextRequest) {
   }
 
   const patch: Partial<Settings> = {};
-
-  if (typeof body.openaiApiKey === "string" && body.openaiApiKey.length > 0) {
-    patch.openaiApiKey = body.openaiApiKey;
-  } else if (body.clearOpenaiApiKey) {
-    patch.openaiApiKey = "";
-  }
-
-  if (typeof body.geminiApiKey === "string" && body.geminiApiKey.length > 0) {
-    patch.geminiApiKey = body.geminiApiKey;
-  } else if (body.clearGeminiApiKey) {
-    patch.geminiApiKey = "";
-  }
-
   const passthroughFields: (keyof Settings)[] = [
     "gptModelSnapshot",
     "geminiModelSnapshot",
@@ -70,10 +49,9 @@ export async function POST(req: NextRequest) {
   }
 
   const saved = await saveSettings(patch);
-  const { openaiApiKey, geminiApiKey, ...rest } = saved;
   return NextResponse.json({
-    ...rest,
-    openaiApiKeyMasked: maskSecret(openaiApiKey),
-    geminiApiKeyMasked: maskSecret(geminiApiKey),
+    ...saved,
+    openaiApiKeyMasked: maskSecret(getApiKey("GPT")),
+    geminiApiKeyMasked: maskSecret(getApiKey("Gemini")),
   });
 }

@@ -25,13 +25,18 @@ vars are the same either way). OpenAI + Gemini calls happen server-side only.
 | --- | --- | --- |
 | `PASSWORD_HASH` | yes | Shared site password, hashed. Generate with `node scripts/hash-password.mjs "your password"` and paste the output. The plaintext password is never stored. |
 | `SESSION_SECRET` | yes | Long random string used to sign the session cookie (e.g. `openssl rand -hex 32`). |
+| `OPENAI_API_KEY` | yes, to use GPT | Server-side only, read directly from the environment — never stored in KV or sent to the client. |
+| `GEMINI_API_KEY` | yes, to use Gemini | Same as above. |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | production | From a Vercel KV / Upstash Redis integration. Without these, the app falls back to a local JSON file (`.data/kv-store.json`, gitignored) so `npm run dev` works out of the box — **never used in production**, since serverless functions don't share a durable filesystem across invocations. |
 
-OpenAI/Gemini API keys and model snapshot strings are **not** environment
-variables — they're entered on the Settings screen and stored server-side in
-KV, masked on every read. There's no hardcoded fallback for model snapshot
-strings by design (see the build spec, §7) — enter the current flagship
-snapshot strings in Settings once the app is running.
+API keys are operator-level secrets for this single-tenant tool (one shared
+password, one operator managing both provider accounts) — they live in
+Vercel env vars, not the Settings screen, so rotating a key never touches
+the app's data store. The Settings screen shows whether each key is
+currently configured (masked), but they're only changed via env vars.
+Model snapshot strings are still a Settings-screen field, since those you'll
+plausibly want to change per run — there's no hardcoded fallback for them
+by design (see the build spec, §7).
 
 ## Local development
 
@@ -45,6 +50,8 @@ Create `.env.local`:
 ```
 PASSWORD_HASH=<value printed above>
 SESSION_SECRET=<a long random string>
+OPENAI_API_KEY=<your OpenAI key>
+GEMINI_API_KEY=<your Gemini key>
 ```
 
 ```bash
@@ -52,17 +59,16 @@ npm run dev
 ```
 
 Open http://localhost:3000, log in with the password you hashed, then set
-API keys and model snapshots on the Settings screen before running either
-module.
+model snapshot strings on the Settings screen before running either module.
 
 ## Deploying to Vercel
 
 1. Push this repo to Vercel.
 2. Add a Redis/KV integration (Storage tab → Redis) — it sets
    `KV_REST_API_URL` / `KV_REST_API_TOKEN` automatically.
-3. Set `PASSWORD_HASH` and `SESSION_SECRET` in the project's Environment
-   Variables.
-4. Deploy. Log in, then fill in API keys + model snapshots on Settings.
+3. Set `PASSWORD_HASH`, `SESSION_SECRET`, `OPENAI_API_KEY`, and
+   `GEMINI_API_KEY` in the project's Environment Variables.
+4. Deploy. Log in, then fill in model snapshots on Settings.
 
 The app ships `robots.txt` (disallow-all) and a `noindex` meta tag as a
 belt-and-suspenders alongside the password gate — it's not meant to be

@@ -41,8 +41,6 @@ const inputClass =
 
 export default function SettingsPage() {
   const [data, setData] = useState<SettingsResponse | null>(null);
-  const [openaiApiKey, setOpenaiApiKey] = useState("");
-  const [geminiApiKey, setGeminiApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,8 +71,6 @@ export default function SettingsPage() {
       const updated = await res.json();
       setData((prev) => (prev ? { ...prev, ...updated } : updated));
       setSavedAt(Date.now());
-      setOpenaiApiKey("");
-      setGeminiApiKey("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed.");
     } finally {
@@ -85,8 +81,6 @@ export default function SettingsPage() {
   function saveAll() {
     if (!data) return;
     save({
-      ...(openaiApiKey ? { openaiApiKey } : {}),
-      ...(geminiApiKey ? { geminiApiKey } : {}),
       gptModelSnapshot: data.gptModelSnapshot,
       geminiModelSnapshot: data.geminiModelSnapshot,
       attributionPromptTemplate: data.attributionPromptTemplate,
@@ -115,38 +109,29 @@ export default function SettingsPage() {
 
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-4 font-semibold text-slate-900">API keys</h2>
-        <Field
-          label="OpenAI API key"
-          hint={
-            data.openaiApiKeyMasked
-              ? `Currently saved: ${data.openaiApiKeyMasked}. Leave blank to keep it.`
-              : "Not set."
-          }
-        >
-          <input
-            type="password"
-            value={openaiApiKey}
-            onChange={(e) => setOpenaiApiKey(e.target.value)}
-            placeholder="sk-…"
-            className={inputClass}
-          />
-        </Field>
-        <Field
-          label="Gemini API key"
-          hint={
-            data.geminiApiKeyMasked
-              ? `Currently saved: ${data.geminiApiKeyMasked}. Leave blank to keep it.`
-              : "Not set."
-          }
-        >
-          <input
-            type="password"
-            value={geminiApiKey}
-            onChange={(e) => setGeminiApiKey(e.target.value)}
-            placeholder="AIza…"
-            className={inputClass}
-          />
-        </Field>
+        <p className="mb-4 text-xs text-slate-500">
+          Set as Vercel environment variables (<code>OPENAI_API_KEY</code>,{" "}
+          <code>GEMINI_API_KEY</code>) rather than here — they&apos;re
+          operator-level secrets for this single-tenant tool, not per-run
+          configuration, and this keeps them out of the app&apos;s data store
+          entirely. Change them from the Vercel project settings (or{" "}
+          <code>.env.local</code> for local dev); this screen just shows
+          whether one is currently configured.
+        </p>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="rounded-md bg-slate-50 p-3">
+            <div className="font-medium text-slate-700">OpenAI</div>
+            <div className="text-slate-600">
+              {data.openaiApiKeyMasked ? `Configured (${data.openaiApiKeyMasked})` : "Not set"}
+            </div>
+          </div>
+          <div className="rounded-md bg-slate-50 p-3">
+            <div className="font-medium text-slate-700">Gemini</div>
+            <div className="text-slate-600">
+              {data.geminiApiKeyMasked ? `Configured (${data.geminiApiKeyMasked})` : "Not set"}
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6">

@@ -6,7 +6,7 @@ import {
   ModelProvider,
 } from "./types";
 import { callModel, ModelCallError } from "./models";
-import { getSettings } from "./store";
+import { getApiKey } from "./apiKeys";
 
 const MODELS: ModelProvider[] = ["GPT", "Gemini"];
 const DIRECTIONS: ScaleDirection[] = ["as_written", "flipped"];
@@ -105,8 +105,7 @@ export async function executeAttributionCell(
   cell: AttributionCell,
   row: VignetteRow
 ): Promise<AttributionCell> {
-  const settings = await getSettings();
-  const apiKey = cell.model === "GPT" ? settings.openaiApiKey : settings.geminiApiKey;
+  const apiKey = getApiKey(cell.model);
 
   const filledPrompt = buildAttributionPrompt(run.promptTemplate, cell.plus50_name, cell.minus50_name);
   // Story sent alongside the filled prompt in one message (§3).
