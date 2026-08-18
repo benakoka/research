@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getVignetteSet, saveAttributionRun, saveAttributionCell, listAttributionRuns } from "@/lib/store";
 import { getSettings } from "@/lib/store";
 import { buildAttributionCells } from "@/lib/attribution";
+import { withApiErrorHandling } from "@/lib/apiError";
 import { AttributionRun } from "@/lib/types";
 
-export async function GET() {
+export const GET = withApiErrorHandling(async () => {
   const runs = await listAttributionRuns();
   return NextResponse.json(runs);
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withApiErrorHandling(async (req: NextRequest) => {
   const body = await req.json().catch(() => ({}));
   const vignetteSetId: string | undefined = body.vignetteSetId;
   if (!vignetteSetId) {
@@ -50,4 +51,4 @@ export async function POST(req: NextRequest) {
   await saveAttributionRun(run);
 
   return NextResponse.json(run);
-}
+});

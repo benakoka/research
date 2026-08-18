@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseVignetteWorkbook, VignetteParseError } from "@/lib/vignettes";
 import { saveVignetteSet, listVignetteSets } from "@/lib/store";
+import { withApiErrorHandling } from "@/lib/apiError";
 import { VignetteSet } from "@/lib/types";
 
-export async function GET() {
+export const GET = withApiErrorHandling(async () => {
   const sets = await listVignetteSets();
   // Don't ship full vignette_text for every row in the list view.
   const summaries = sets.map((s) => ({
@@ -13,9 +14,9 @@ export async function GET() {
     rowCount: s.rows.length,
   }));
   return NextResponse.json(summaries);
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withApiErrorHandling(async (req: NextRequest) => {
   const formData = await req.formData();
   const file = formData.get("file");
   if (!(file instanceof File)) {
@@ -45,4 +46,4 @@ export async function POST(req: NextRequest) {
   await saveVignetteSet(set);
 
   return NextResponse.json({ set, warnings: parsed.warnings });
-}
+});

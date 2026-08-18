@@ -14,18 +14,38 @@ import path from "node:path";
 const hasRealKv =
   !!process.env.KV_REST_API_URL && !!process.env.KV_REST_API_TOKEN;
 
+// Vercel sets this in every runtime (build, serverless function, edge).
+// Used only to turn a doomed disk write into a clear error instead of a
+// cryptic filesystem exception — Vercel's serverless functions have no
+// writable, persistent disk, so the local-file fallback can't work there.
+const runningOnVercel = !!process.env.VERCEL;
+
 const DATA_FILE = path.join(process.cwd(), ".data", "kv-store.json");
+
+function assertLocalFallbackUsable() {
+  if (runningOnVercel) {
+    throw new Error(
+      "Vercel KV isn't configured (KV_REST_API_URL / KV_REST_API_TOKEN are missing) " +
+        "and this is running on Vercel, which has no writable persistent disk to fall " +
+        "back to. Add a Redis/KV storage integration in the Vercel project's Storage " +
+        "tab, then redeploy."
+    );
+  }
+}
 
 function readLocalStore(): Record<string, unknown> {
   try {
     const raw = fs.readFileSync(DATA_FILE, "utf-8");
     return JSON.parse(raw);
-  } catch {
-    return {};
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {}; // no store yet — fine
+    assertLocalFallbackUsable();
+    throw err;
   }
 }
 
 function writeLocalStore(store: Record<string, unknown>) {
+  assertLocalFallbackUsable();
   fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
   fs.writeFileSync(DATA_FILE, JSON.stringify(store), "utf-8");
 }

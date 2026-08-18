@@ -6,12 +6,13 @@ import {
   getVignetteSet,
 } from "@/lib/store";
 import { executeAttributionCell } from "@/lib/attribution";
+import { withApiErrorHandling } from "@/lib/apiError";
 
 // Allows re-running a single failed cell without re-running the whole batch (§3).
-export async function POST(
+export const POST = withApiErrorHandling(async (
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; cellId: string }> }
-) {
+) => {
   const { id, cellId } = await params;
   const run = await getAttributionRun(id);
   if (!run) return NextResponse.json({ error: "Run not found." }, { status: 404 });
@@ -30,4 +31,4 @@ export async function POST(
   await saveAttributionCell(run.id, result);
 
   return NextResponse.json(result);
-}
+});

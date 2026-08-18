@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRewritingRun, getRewritingChain, saveRewritingChain } from "@/lib/store";
 import { executeGeneration } from "@/lib/rewriting";
+import { withApiErrorHandling } from "@/lib/apiError";
 
 // Allows re-running a single failed/miscompliant generation without
 // restarting the whole chain (§5). Re-running generation N re-derives its
 // input from generation N-1's *current* text, same as the original run.
-export async function POST(
+export const POST = withApiErrorHandling(async (
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; chainId: string; gen: string }> }
-) {
+) => {
   const { id, chainId, gen } = await params;
   const genIndex = Number(gen);
   if (!Number.isInteger(genIndex) || genIndex < 1 || genIndex > 5) {
@@ -39,4 +40,4 @@ export async function POST(
   await saveRewritingChain(run.id, { ...chain, generations: finalGens, status });
 
   return NextResponse.json(result);
-}
+});

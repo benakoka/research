@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyPassword } from "@/lib/password";
 import { createSessionToken, COOKIE_NAME } from "@/lib/session";
+import { withApiErrorHandling } from "@/lib/apiError";
 
-export async function POST(req: NextRequest) {
+export const POST = withApiErrorHandling(async (req: NextRequest) => {
   const storedHash = process.env.PASSWORD_HASH;
   if (!storedHash) {
     return NextResponse.json(
@@ -33,4 +34,4 @@ export async function POST(req: NextRequest) {
     maxAge: 60 * 60 * 24 * 30,
   });
   return res;
-}
+});

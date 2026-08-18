@@ -7,6 +7,7 @@ import {
 } from "@/lib/store";
 import { executeGeneration, nextRunnableGenerationIndex } from "@/lib/rewriting";
 import { summarizeProgress } from "@/lib/progress";
+import { withApiErrorHandling } from "@/lib/apiError";
 import { RewritingChain } from "@/lib/types";
 
 // Modest concurrency per batch across chains (chains are independent; within
@@ -21,10 +22,10 @@ function deriveChainStatus(chain: RewritingChain): RewritingChain["status"] {
   return "pending";
 }
 
-export async function POST(
+export const POST = withApiErrorHandling(async (
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
-) {
+) => {
   const { id } = await params;
   const run = await getRewritingRun(id);
   if (!run) return NextResponse.json({ error: "Run not found." }, { status: 404 });
@@ -79,4 +80,4 @@ export async function POST(
   }
 
   return NextResponse.json({ progress, done });
-}
+});

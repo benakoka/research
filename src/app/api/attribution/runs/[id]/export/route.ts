@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAttributionRun, getAttributionCells, getVignetteSet } from "@/lib/store";
 import { buildAttributionLongCsv, buildAttributionWideWorkbook } from "@/lib/export/attribution";
+import { withApiErrorHandling } from "@/lib/apiError";
 
-export async function GET(
+export const GET = withApiErrorHandling(async (
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
-) {
+) => {
   const { id } = await params;
   const format = req.nextUrl.searchParams.get("format") ?? "long";
 
@@ -37,4 +38,4 @@ export async function GET(
   }
 
   return NextResponse.json({ error: "Unknown format. Use long or wide." }, { status: 400 });
-}
+});

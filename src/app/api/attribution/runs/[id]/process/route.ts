@@ -8,6 +8,7 @@ import {
 } from "@/lib/store";
 import { executeAttributionCell } from "@/lib/attribution";
 import { summarizeProgress } from "@/lib/progress";
+import { withApiErrorHandling } from "@/lib/apiError";
 
 // Modest concurrency per batch to avoid hammering provider rate limits (§5).
 // The client polls this endpoint repeatedly; each call processes one batch
@@ -15,10 +16,10 @@ import { summarizeProgress } from "@/lib/progress";
 // function time limits for the 100+ call attribution runs.
 const BATCH_SIZE = 6;
 
-export async function POST(
+export const POST = withApiErrorHandling(async (
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
-) {
+) => {
   const { id } = await params;
   const run = await getAttributionRun(id);
   if (!run) return NextResponse.json({ error: "Run not found." }, { status: 404 });
@@ -71,4 +72,4 @@ export async function POST(
   }
 
   return NextResponse.json({ progress, done });
-}
+});

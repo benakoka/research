@@ -7,14 +7,15 @@ import {
   getSettings,
 } from "@/lib/store";
 import { buildRewritingChains } from "@/lib/rewriting";
+import { withApiErrorHandling } from "@/lib/apiError";
 import { RewritingRun } from "@/lib/types";
 
-export async function GET() {
+export const GET = withApiErrorHandling(async () => {
   const runs = await listRewritingRuns();
   return NextResponse.json(runs);
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withApiErrorHandling(async (req: NextRequest) => {
   const body = await req.json().catch(() => ({}));
   const vignetteSetId: string | undefined = body.vignetteSetId;
   if (!vignetteSetId) {
@@ -57,4 +58,4 @@ export async function POST(req: NextRequest) {
   await saveRewritingRun(run);
 
   return NextResponse.json(run);
-}
+});
