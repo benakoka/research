@@ -43,7 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   rewritingPromptTemplate: DEFAULT_REWRITING_PROMPT,
   defaultRepCount: 1,
   defaultWordCountTargets: [55, 50, 45, 40, 35],
-  retryThresholdFraction: 0.25,
+  retryThresholdFraction: 0.1,
 };
 
 // ---------------------------------------------------------------------------

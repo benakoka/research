@@ -160,7 +160,7 @@ from the other columns — don't type it by hand.
   model runs once) — configurable in Settings, but nothing in the app
   assumes reps > 1. The wide-format Attribution export averages across reps
   if it's ever raised.
-- Rewriting's automatic retry-on-miss threshold (default 25%) is a Settings
+- Rewriting's automatic retry-on-miss threshold (default 10%) is a Settings
   constant, not a hardcoded value.
 - There is no spending cap or cost tracking in the app — manage budget
   limits directly in the OpenAI/Google billing dashboards.
