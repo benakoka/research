@@ -60,6 +60,16 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Number fields hold whatever's being typed here — free-form, uncommitted
+  // — and only clamp/commit into `data` on blur. Clamping on every keystroke
+  // (the first pass at this fix) meant clearing a field to type a new value
+  // snapped it back to the old one before you could finish typing, since an
+  // in-progress "" or partial value is momentarily invalid. `null` = not
+  // currently being edited, so the input falls back to displaying `data`.
+  const [repCountRaw, setRepCountRaw] = useState<string | null>(null);
+  const [wordCountRaw, setWordCountRaw] = useState<(string | null)[]>([null, null, null, null, null]);
+  const [retryThresholdRaw, setRetryThresholdRaw] = useState<string | null>(null);
+
   async function copySuggestedModel() {
     await navigator.clipboard.writeText(SUGGESTED_TEST_MODEL);
     setCopied(true);
@@ -230,8 +240,13 @@ export default function SettingsPage() {
             type="number"
             min={1}
             step={1}
-            value={data.defaultRepCount}
-            onChange={(e) => update("defaultRepCount", clampPositiveInt(e.target.value, data.defaultRepCount))}
+            value={repCountRaw ?? String(data.defaultRepCount)}
+            onChange={(e) => setRepCountRaw(e.target.value)}
+            onBlur={() => {
+              if (repCountRaw === null) return;
+              update("defaultRepCount", clampPositiveInt(repCountRaw, data.defaultRepCount));
+              setRepCountRaw(null);
+            }}
             className={inputClass + " max-w-[8rem]"}
           />
         </Field>
@@ -256,11 +271,20 @@ export default function SettingsPage() {
                 type="number"
                 min={1}
                 step={1}
-                value={v}
+                value={wordCountRaw[i] ?? String(v)}
                 onChange={(e) => {
+                  const nextRaw = [...wordCountRaw];
+                  nextRaw[i] = e.target.value;
+                  setWordCountRaw(nextRaw);
+                }}
+                onBlur={() => {
+                  if (wordCountRaw[i] === null) return;
                   const next = [...data.defaultWordCountTargets] as typeof data.defaultWordCountTargets;
-                  next[i] = clampPositiveInt(e.target.value, v);
+                  next[i] = clampPositiveInt(wordCountRaw[i]!, v);
                   update("defaultWordCountTargets", next);
+                  const nextRaw = [...wordCountRaw];
+                  nextRaw[i] = null;
+                  setWordCountRaw(nextRaw);
                 }}
                 className={inputClass + " w-20"}
               />
@@ -280,11 +304,15 @@ export default function SettingsPage() {
               min={0}
               max={100}
               step={1}
-              value={Math.round(data.retryThresholdFraction * 100)}
-              onChange={(e) => {
-                const pct = Math.round(Number(e.target.value));
-                const clamped = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 0;
+              value={retryThresholdRaw ?? String(Math.round(data.retryThresholdFraction * 100))}
+              onChange={(e) => setRetryThresholdRaw(e.target.value)}
+              onBlur={() => {
+                if (retryThresholdRaw === null) return;
+                const pct = Math.round(Number(retryThresholdRaw));
+                const currentPct = Math.round(data.retryThresholdFraction * 100);
+                const clamped = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : currentPct;
                 update("retryThresholdFraction", clamped / 100);
+                setRetryThresholdRaw(null);
               }}
               className={inputClass + " w-24"}
             />
