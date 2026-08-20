@@ -62,6 +62,11 @@ export function buildAttributionCells(
   gptModelSnapshot: string,
   geminiModelSnapshot: string
 ): AttributionCell[] {
+  // Defense in depth: the Settings UI already clamps this, but a run must
+  // never silently build zero cells because repCount was 0, negative, or
+  // fractional (e.g. hand-edited localStorage) — that leaves someone staring
+  // at a "Start run" button that appears to do nothing.
+  const reps = Math.max(1, Math.round(repCount) || 1);
   const snapshotFor: Record<ModelProvider, string> = {
     GPT: gptModelSnapshot,
     Gemini: geminiModelSnapshot,
@@ -71,7 +76,7 @@ export function buildAttributionCells(
     for (const direction of DIRECTIONS) {
       const { femaleSlotName, maleSlotName } = slotNames(row, direction);
       for (const model of MODELS) {
-        for (let rep = 1; rep <= repCount; rep++) {
+        for (let rep = 1; rep <= reps; rep++) {
           cells.push({
             id: cellId(row.vignette_id, direction, model, rep),
             vignette_id: row.vignette_id,

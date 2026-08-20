@@ -46,10 +46,11 @@ function LoginForm() {
       <p className="mb-6 text-sm text-slate-500">
         Enter the shared password to continue.
       </p>
-      <label className="mb-1 block text-sm font-medium text-slate-700">
+      <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-700">
         Password
       </label>
       <input
+        id="password"
         type="password"
         autoFocus
         value={password}

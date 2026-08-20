@@ -12,20 +12,37 @@ interface KeyStatus {
 
 function Field({
   label,
+  htmlFor,
   hint,
   children,
 }: {
   label: string;
+  htmlFor: string;
   hint?: string;
   children: React.ReactNode;
 }) {
+  const hintId = hint ? `${htmlFor}-hint` : undefined;
   return (
     <div className="mb-5">
-      <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
-      {hint && <p className="mb-1 text-xs text-slate-500">{hint}</p>}
+      <label htmlFor={htmlFor} className="mb-1 block text-sm font-medium text-slate-700">
+        {label}
+      </label>
+      {hint && (
+        <p id={hintId} className="mb-1 text-xs text-slate-500">
+          {hint}
+        </p>
+      )}
       {children}
     </div>
   );
+}
+
+/** Clamps a settings number field to a positive integer — never let 0,
+ * negative, or fractional values reach a run (e.g. a rep count of 0 builds
+ * zero cells and "Start run" silently does nothing). */
+function clampPositiveInt(raw: string, fallback = 1): number {
+  const n = Math.round(Number(raw));
+  return Number.isFinite(n) && n >= 1 ? n : fallback;
 }
 
 const inputClass =
@@ -152,15 +169,19 @@ export default function SettingsPage() {
             </button>
           </div>
         )}
-        <Field label="GPT model snapshot" hint="e.g. gpt-5.2">
+        <Field label="GPT model snapshot" htmlFor="gpt-model-snapshot" hint="e.g. gpt-5.2">
           <input
+            id="gpt-model-snapshot"
+            aria-describedby="gpt-model-snapshot-hint"
             value={data.gptModelSnapshot}
             onChange={(e) => update("gptModelSnapshot", e.target.value)}
             className={inputClass + " font-mono"}
           />
         </Field>
-        <Field label="Gemini model snapshot" hint="e.g. gemini-3-pro">
+        <Field label="Gemini model snapshot" htmlFor="gemini-model-snapshot" hint="e.g. gemini-3-pro">
           <input
+            id="gemini-model-snapshot"
+            aria-describedby="gemini-model-snapshot-hint"
             value={data.geminiModelSnapshot}
             onChange={(e) => update("geminiModelSnapshot", e.target.value)}
             className={inputClass + " font-mono"}
@@ -172,20 +193,22 @@ export default function SettingsPage() {
         <h2 className="mb-4 font-semibold text-slate-900">Prompt templates</h2>
         <Field
           label="Attribution rating prompt"
+          htmlFor="attribution-prompt"
           hint="Must contain [FEMALE NAME] and [MALE NAME]. Shipped default is the exact wording confirmed for the pilot — edit with care."
         >
           <textarea
+            id="attribution-prompt"
+            aria-describedby="attribution-prompt-hint"
             value={data.attributionPromptTemplate}
             onChange={(e) => update("attributionPromptTemplate", e.target.value)}
             rows={6}
             className={inputClass + " font-mono"}
           />
         </Field>
-        <Field
-          label="Rewriting prompt"
-          hint="Must contain [TARGET WORD COUNT]."
-        >
+        <Field label="Rewriting prompt" htmlFor="rewriting-prompt" hint="Must contain [TARGET WORD COUNT].">
           <textarea
+            id="rewriting-prompt"
+            aria-describedby="rewriting-prompt-hint"
             value={data.rewritingPromptTemplate}
             onChange={(e) => update("rewritingPromptTemplate", e.target.value)}
             rows={6}
@@ -198,13 +221,17 @@ export default function SettingsPage() {
         <h2 className="mb-4 font-semibold text-slate-900">Attribution defaults</h2>
         <Field
           label="Default rep count"
-          hint="Confirmed default is 1 — each text × scale direction × model runs once. Raise only for deliberate repeated sampling."
+          htmlFor="default-rep-count"
+          hint="Confirmed default is 1 — each text × scale direction × model runs once. Raise only for deliberate repeated sampling. Whole numbers, 1 or greater."
         >
           <input
+            id="default-rep-count"
+            aria-describedby="default-rep-count-hint"
             type="number"
             min={1}
+            step={1}
             value={data.defaultRepCount}
-            onChange={(e) => update("defaultRepCount", Number(e.target.value))}
+            onChange={(e) => update("defaultRepCount", clampPositiveInt(e.target.value, data.defaultRepCount))}
             className={inputClass + " max-w-[8rem]"}
           />
         </Field>
@@ -212,35 +239,53 @@ export default function SettingsPage() {
 
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-4 font-semibold text-slate-900">Rewriting defaults</h2>
-        <Field label="Per-generation word-count targets" hint="Generations 1 through 5, in order.">
+        <fieldset className="mb-5">
+          <legend className="mb-1 block text-sm font-medium text-slate-700">
+            Per-generation word-count targets
+          </legend>
+          <p id="word-count-targets-hint" className="mb-1 text-xs text-slate-500">
+            Generations 1 through 5, in order. Whole numbers, 1 or greater.
+          </p>
           <div className="flex gap-2">
             {data.defaultWordCountTargets.map((v, i) => (
               <input
                 key={i}
+                id={`word-count-target-${i}`}
+                aria-label={`Generation ${i + 1} word-count target`}
+                aria-describedby="word-count-targets-hint"
                 type="number"
                 min={1}
+                step={1}
                 value={v}
                 onChange={(e) => {
                   const next = [...data.defaultWordCountTargets] as typeof data.defaultWordCountTargets;
-                  next[i] = Number(e.target.value);
+                  next[i] = clampPositiveInt(e.target.value, v);
                   update("defaultWordCountTargets", next);
                 }}
                 className={inputClass + " w-20"}
               />
             ))}
           </div>
-        </Field>
+        </fieldset>
         <Field
           label="Retry threshold"
+          htmlFor="retry-threshold"
           hint="Retry once, automatically, if a generation misses its target by more than this fraction. Adjustable, not a hardcoded magic number."
         >
           <div className="flex items-center gap-2">
             <input
+              id="retry-threshold"
+              aria-describedby="retry-threshold-hint"
               type="number"
               min={0}
               max={100}
+              step={1}
               value={Math.round(data.retryThresholdFraction * 100)}
-              onChange={(e) => update("retryThresholdFraction", Number(e.target.value) / 100)}
+              onChange={(e) => {
+                const pct = Math.round(Number(e.target.value));
+                const clamped = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 0;
+                update("retryThresholdFraction", clamped / 100);
+              }}
               className={inputClass + " w-24"}
             />
             <span className="text-sm text-slate-500">%</span>

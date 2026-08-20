@@ -48,7 +48,7 @@ the previous one in `localStorage`.
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `PASSWORD_HASH` | yes | Shared site password, hashed. Generate with `node scripts/hash-password.mjs "your password"` and paste the output. The plaintext password is never stored. |
-| `SESSION_SECRET` | yes | Long random string used to sign the session cookie (e.g. `openssl rand -hex 32`). |
+| `SESSION_SECRET` | yes | Long random string used to sign the session cookie (e.g. `openssl rand -hex 32`). Sessions last 12 hours and there's no server-side session store, so there's no way to revoke one specific token early — but rotating this value and redeploying invalidates *every* outstanding session at once (their HMAC signatures stop verifying), which is the emergency kill switch if a cookie is ever suspected leaked. |
 | `OPENAI_API_KEY` | yes, to use GPT | Server-side only, read directly from the environment — never stored anywhere, never sent to the client. |
 | `GEMINI_API_KEY` | yes, to use Gemini | Same as above. |
 | `USE_CLAUDE_FOR_TESTING` | no | Test-mode only — see below. |

@@ -1,4 +1,5 @@
 import { ModelCallResult, ModelCallError } from "./types";
+import { fetchWithTimeout, isTimeoutError } from "./fetchTimeout";
 
 // Server-side only — never import this from client components (§1).
 export async function callGemini(
@@ -10,14 +11,25 @@ export async function callGemini(
     modelSnapshot
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // No generationConfig.temperature override — leave at the provider's default (§2).
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // No generationConfig.temperature override — leave at the provider's default (§2).
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    });
+  } catch (err) {
+    // Timeouts are retryable (§5) — a hung request shouldn't block the rest
+    // of the batch's Promise.all forever, but it also isn't a permanent failure.
+    if (isTimeoutError(err)) throw new ModelCallError(`Gemini: ${err.message}`, true);
+    throw new ModelCallError(
+      `Gemini request failed: ${err instanceof Error ? err.message : "Unknown network error."}`,
+      true
+    );
+  }
 
   const bodyText = await res.text();
 

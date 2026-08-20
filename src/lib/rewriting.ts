@@ -31,7 +31,10 @@ function seedGeneration(row: VignetteRow, timestamp: string): RewritingGeneratio
   };
 }
 
-function pendingGeneration(generation: number, target: number): RewritingGeneration {
+/** A fresh, not-yet-run generation slot. Exported so callers (e.g. the
+ * Rewriting page's retry flow) can reset a generation back to this exact
+ * shape when invalidating it, rather than hand-rolling the same object. */
+export function pendingGeneration(generation: number, target: number): RewritingGeneration {
   return {
     generation,
     text: "",
@@ -54,6 +57,17 @@ export function buildRewritingChains(
   gptModelSnapshot: string,
   geminiModelSnapshot: string
 ): RewritingChain[] {
+  // Defense in depth: the Settings UI already clamps these, but a target of
+  // 0/negative/fractional words would either build a chain that can never
+  // comply or silently misbehave downstream (e.g. missesTarget's
+  // divide-by-target math) — never let one reach the run itself.
+  const targets = wordCountTargets.map((t) => Math.max(1, Math.round(t) || 1)) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
   const snapshotFor: Record<ModelProvider, string> = {
     GPT: gptModelSnapshot,
     Gemini: geminiModelSnapshot,
@@ -74,10 +88,10 @@ export function buildRewritingChains(
         order_variant: row.order_variant,
         model,
         model_snapshot: snapshotFor[model],
-        wordCountTargets,
+        wordCountTargets: targets,
         generations: [
           seedGeneration(row, now),
-          ...wordCountTargets.map((t, i) => pendingGeneration(i + 1, t)),
+          ...targets.map((t, i) => pendingGeneration(i + 1, t)),
         ],
         status: "pending",
       });

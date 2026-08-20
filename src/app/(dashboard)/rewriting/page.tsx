@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import VignetteUploader from "../VignetteUploader";
-import { buildRewritingChains, nextRunnableGenerationIndex } from "@/lib/rewriting";
+import { buildRewritingChains, nextRunnableGenerationIndex, pendingGeneration } from "@/lib/rewriting";
 import {
   getSettings,
   getRewritingRun,
@@ -151,11 +151,24 @@ export default function RewritingPage() {
       if (!chain) return;
       const generations = [...chain.generations];
       generations[gen] = { ...generations[gen], status: "pending", error: null };
+      // Every generation *after* the one being retried was built from its
+      // output text (see lib/rewritingExec.ts — each prompt is the previous
+      // generation's text). Once gen's text is about to change, anything
+      // downstream is stale and needs to be regenerated too, or the export
+      // would silently mix a new Gen2 with a Gen3-5 that were never rebuilt
+      // from it.
+      for (let i = gen + 1; i <= 5; i++) {
+        generations[i] = pendingGeneration(i, chain.wordCountTargets[i - 1]);
+      }
       const resetChain = { ...chain, generations };
-      const results = await processBatch([resetChain], run.promptTemplate, run.retryThresholdFraction);
-      const updated = results[0];
-      const chains = run.chains.map((c) => (c.id === chainId ? updated : c));
-      persist({ ...run, chains });
+      const chains = run.chains.map((c) => (c.id === chainId ? resetChain : c));
+      const resetRun = { ...run, chains, status: "running" as const };
+      persist(resetRun);
+      // Hand off to the normal batch driver so the retried generation *and*
+      // the now-invalidated downstream ones all get regenerated in order,
+      // instead of leaving them stuck on "pending" until something else
+      // happens to restart the run.
+      await driveRun(resetRun);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retry failed.");
     } finally {
@@ -309,7 +322,12 @@ export default function RewritingPage() {
                             {(gen.status === "error" || canRetry) && (
                               <button
                                 onClick={() => retryGeneration(chain.id, gen.generation)}
-                                disabled={retrying === retryKey}
+                                disabled={retrying === retryKey || processing}
+                                title={
+                                  processing && retrying !== retryKey
+                                    ? "Wait for the current batch to finish before retrying."
+                                    : undefined
+                                }
                                 className="ml-1 text-slate-500 underline disabled:opacity-50"
                               >
                                 {retrying === retryKey ? "…" : "retry"}

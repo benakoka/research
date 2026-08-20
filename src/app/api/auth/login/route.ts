@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyPassword } from "@/lib/password";
-import { createSessionToken, COOKIE_NAME } from "@/lib/session";
+import { createSessionToken, COOKIE_NAME, SESSION_TTL_SECONDS } from "@/lib/session";
 import { withApiErrorHandling } from "@/lib/apiError";
 
 export const POST = withApiErrorHandling(async (req: NextRequest) => {
@@ -31,7 +31,10 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    // Was hardcoded separately from the token's own embedded expiry (§ see
+    // lib/session.ts) — kept in sync now so the cookie doesn't outlive the
+    // token it holds (or vice versa).
+    maxAge: SESSION_TTL_SECONDS,
   });
   return res;
 });

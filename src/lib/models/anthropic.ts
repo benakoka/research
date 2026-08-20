@@ -1,4 +1,5 @@
 import { ModelCallResult, ModelCallError } from "./types";
+import { fetchWithTimeout, isTimeoutError } from "./fetchTimeout";
 
 // Server-side only — never import this from client components (§1).
 //
@@ -12,20 +13,31 @@ export async function callAnthropic(
   modelSnapshot: string,
   prompt: string
 ): Promise<ModelCallResult> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    // No temperature/sampling override — leave at the provider's default (§2).
-    body: JSON.stringify({
-      model: modelSnapshot,
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      // No temperature/sampling override — leave at the provider's default (§2).
+      body: JSON.stringify({
+        model: modelSnapshot,
+        max_tokens: 1024,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+  } catch (err) {
+    // Timeouts are retryable (§5) — a hung request shouldn't block the rest
+    // of the batch's Promise.all forever, but it also isn't a permanent failure.
+    if (isTimeoutError(err)) throw new ModelCallError(`Anthropic: ${err.message}`, true);
+    throw new ModelCallError(
+      `Anthropic request failed: ${err instanceof Error ? err.message : "Unknown network error."}`,
+      true
+    );
+  }
 
   const bodyText = await res.text();
 

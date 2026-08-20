@@ -3,7 +3,17 @@
 // and Node.js API routes.
 
 const COOKIE_NAME = "pilot_session";
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+// Deliberately short-lived: there's no server-side session store (by design
+// — see README "Where data lives"), so a session token can't be revoked
+// individually once issued. A 30-day token that leaked (browser history on
+// a shared machine, a copied cookie, etc.) would stay valid for a month with
+// nothing anyone could do about that one token specifically. 12 hours keeps
+// the exposure window small while still covering a normal working session
+// without re-login. The one lever that *does* exist for revoking every
+// outstanding session at once, in an emergency, is rotating SESSION_SECRET
+// (Vercel env var) and redeploying — every existing token's HMAC signature
+// stops verifying immediately (see README "Environment variables").
+const SESSION_TTL_SECONDS = 60 * 60 * 12; // 12 hours
 
 function getSecret(): string {
   const secret = process.env.SESSION_SECRET;
@@ -78,4 +88,4 @@ export async function verifySessionToken(token: string | undefined | null): Prom
   }
 }
 
-export { COOKIE_NAME };
+export { COOKIE_NAME, SESSION_TTL_SECONDS };
