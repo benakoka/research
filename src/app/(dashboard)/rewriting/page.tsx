@@ -44,11 +44,24 @@ export default function RewritingPage() {
   const [retrying, setRetrying] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Separate from `error` (which is transient, about the last batch/export
+  // action) — this one persists across renders once set, because it means
+  // this browser has silently stopped being able to save the run at all
+  // (most likely localStorage quota exceeded). The run keeps going in
+  // memory either way, but "closing the tab loses nothing" is no longer
+  // true once this is set, so it needs to stay visible until the user
+  // exports (or dismisses it deliberately), not just flash by.
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const runningRef = useRef(false);
 
   function persist(updated: RewritingRun) {
     setRun(updated);
-    saveRewritingRun(updated);
+    const ok = saveRewritingRun(updated);
+    if (!ok) {
+      setStorageWarning(
+        "This browser's storage is full, so new results are no longer being saved — they only exist in this tab until you export. Export now, or free up space (clear old runs/other sites' data) and reload to resume normal saving."
+      );
+    }
   }
 
   async function processBatch(chains: RewritingChain[], promptTemplate: string, retryThresholdFraction: number) {
@@ -192,6 +205,10 @@ export default function RewritingPage() {
       }
       const blob = await res.blob();
       downloadBlob(blob, `rewriting_${format}.${format === "long" ? "csv" : "xlsx"}`);
+      // A successful export is a durable copy outside this browser's
+      // storage, so whatever the local-save situation is no longer matters
+      // for anything already in the file.
+      setStorageWarning(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed.");
     } finally {
@@ -219,6 +236,21 @@ export default function RewritingPage() {
           until you export it.
         </p>
       </div>
+
+      {storageWarning && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-4 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800"
+        >
+          <span>⚠ {storageWarning}</span>
+          <button
+            onClick={() => setStorageWarning(null)}
+            className="shrink-0 text-red-700 underline hover:text-red-900"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-4 font-semibold text-slate-900">Vignette set</h2>

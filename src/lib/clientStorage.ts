@@ -38,13 +38,20 @@ function read<T>(key: string, fallback: T): T {
   }
 }
 
-function write<T>(key: string, value: T): void {
-  if (!isBrowser()) return;
+/** Returns whether the write actually succeeded — callers that depend on
+ * this persisting (an in-progress run, in particular) need to know, since a
+ * silently swallowed quota-exceeded error would otherwise mean "closing the
+ * tab loses nothing" quietly stops being true with no indication to the
+ * user. See saveAttributionRun/saveRewritingRun and their callers. */
+function write<T>(key: string, value: T): boolean {
+  if (!isBrowser()) return false;
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch (err) {
     // Most likely quota exceeded (a long run's raw responses can add up).
     console.error(`Failed to persist ${key} to localStorage`, err);
+    return false;
   }
 }
 
@@ -87,8 +94,11 @@ export function getAttributionRun(): AttributionRun | null {
   return read<AttributionRun | null>(KEYS.attributionRun, null);
 }
 
-export function saveAttributionRun(run: AttributionRun): void {
-  write(KEYS.attributionRun, run);
+/** Returns false if the write failed (e.g. localStorage quota exceeded) —
+ * the run continues in memory either way, but the caller should warn the
+ * user that new results have stopped actually being saved. */
+export function saveAttributionRun(run: AttributionRun): boolean {
+  return write(KEYS.attributionRun, run);
 }
 
 export function clearAttributionRun(): void {
@@ -99,8 +109,11 @@ export function getRewritingRun(): RewritingRun | null {
   return read<RewritingRun | null>(KEYS.rewritingRun, null);
 }
 
-export function saveRewritingRun(run: RewritingRun): void {
-  write(KEYS.rewritingRun, run);
+/** Returns false if the write failed (e.g. localStorage quota exceeded) —
+ * the run continues in memory either way, but the caller should warn the
+ * user that new results have stopped actually being saved. */
+export function saveRewritingRun(run: RewritingRun): boolean {
+  return write(KEYS.rewritingRun, run);
 }
 
 export function clearRewritingRun(): void {
