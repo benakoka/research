@@ -39,7 +39,8 @@ const LONG_HEADERS = [
  *
  * Matches the wide export's net_female_favor exactly (same two corrections,
  * same order), just applied to one raw rating instead of a pre-combined
- * woman_first/man_first pair. See the "Legend" sheet on the wide export.
+ * woman_positive/man_positive pair. See the "Legend" sheet on the wide
+ * export.
  */
 function favorFemale(cell: AttributionCell): number | null {
   if (cell.rating === null) return null;
@@ -79,12 +80,12 @@ const WIDE_HEADERS = [
   "female_name",
   "male_name",
   "vignette_text",
-  "GPT_woman_first",
-  "GPT_man_first",
+  "GPT_woman_positive",
+  "GPT_man_positive",
   "GPT_net_rating_unadjusted",
   "GPT_net_female_favor",
-  "Gemini_woman_first",
-  "Gemini_man_first",
+  "Gemini_woman_positive",
+  "Gemini_man_positive",
   "Gemini_net_rating_unadjusted",
   "Gemini_net_female_favor",
   "Combined_net_female_favor",
@@ -98,10 +99,11 @@ function average(values: number[]): number | null {
 /**
  * Explains, in the file itself, the things that are easy to miss just from
  * the column headers: order_variant (A/B, from the upload), the
- * as-written/flipped scale-direction crossing (the woman_first/man_first
+ * as-written/flipped scale-direction crossing (the woman_positive/man_positive
  * columns), and — most importantly — that valence (credit/blame) flips what
  * "+50 for the woman" even means, which is why net_female_favor isn't just
- * (woman_first − man_first) ÷ 2. All three are independent of each other.
+ * (woman_positive − man_positive) ÷ 2. All three are independent of each
+ * other.
  */
 function addAttributionLegendSheet(workbook: ExcelJS.Workbook) {
   const sheet = workbook.addWorksheet("Legend");
@@ -114,19 +116,19 @@ function addAttributionLegendSheet(workbook: ExcelJS.Workbook) {
     ],
     [
       "valence (credit/blame)",
-      "From the uploaded vignette set. Matters because the rating scale means opposite things depending on it: on a credit row, +50 for the female actor means the model thinks she deserves the reward — favorable to her. On a blame row, +50 for the female actor means the model thinks she deserves the reprimand — unfavorable to her. The raw woman_first/man_first/net_rating_unadjusted columns below don't know the difference; net_female_favor and Combined_net_female_favor do (see below) — those are the columns to read when comparing credit and blame rows together.",
+      "From the uploaded vignette set. Matters because the rating scale means opposite things depending on it: on a credit row, +50 for the female actor means the model thinks she deserves the reward — favorable to her. On a blame row, +50 for the female actor means the model thinks she deserves the reprimand — unfavorable to her. The raw woman_positive/man_positive/net_rating_unadjusted columns below don't know the difference; net_female_favor and Combined_net_female_favor do (see below) — those are the columns to read when comparing credit and blame rows together.",
     ],
     [
-      "{model}_woman_first",
-      "The raw rating from the call where the prompt assigned +50 to the female actor and -50 to the male actor (the \"as-written\" scale direction) — exactly as scored, not yet adjusted for valence.",
+      "{model}_woman_positive",
+      "The raw rating from the call where the prompt assigned +50 (the \"positive\" slot) to the female actor and -50 to the male actor (the \"as-written\" scale direction) — exactly as scored, not yet adjusted for valence.",
     ],
     [
-      "{model}_man_first",
-      "The raw rating from the same prompt wording, but with the two names swapped into the +50/-50 slots (the \"flipped\" scale direction) — +50 now on the male actor, -50 on the female actor. This call happens for every row, same as woman_first; it isn't conditional on anything. Also not yet adjusted for valence.",
+      "{model}_man_positive",
+      "The raw rating from the same prompt wording, but with the two names swapped into the +50/-50 slots (the \"flipped\" scale direction) — +50 (the \"positive\" slot) now on the male actor, -50 on the female actor. This call happens for every row, same as woman_positive; it isn't conditional on anything. Also not yet adjusted for valence.",
     ],
     [
       "{model}_net_rating_unadjusted",
-      "= (woman_first − man_first) ÷ 2. Recodes the two raw calls onto one consistent scale-direction (positive = the +50 slot's occupant, whichever name that was, came out favored) — but does NOT yet account for credit vs. blame, so on a blame row a positive number here still means the model favored the woman with responsibility for something bad, i.e. was actually unfavorable to her. Kept for transparency/audit; the column to read for a bias direction that's consistent across all rows is net_female_favor, next.",
+      "= (woman_positive − man_positive) ÷ 2. Recodes the two raw calls onto one consistent scale-direction (positive = the +50 slot's occupant, whichever name that was, came out favored) — but does NOT yet account for credit vs. blame, so on a blame row a positive number here still means the model favored the woman with responsibility for something bad, i.e. was actually unfavorable to her. Kept for transparency/audit; the column to read for a bias direction that's consistent across all rows is net_female_favor, next.",
     ],
     [
       "{model}_net_female_favor",
