@@ -23,17 +23,28 @@ const LONG_HEADERS = [
 ] as const;
 
 /**
- * +50 on this scale means "the female actor is fully responsible" — which is
- * favorable to her on a credit row (she gets the reward) but unfavorable to
- * her on a blame row (she gets the reprimand). `favor_female` recodes a
- * single response onto one consistent direction — positive always means
- * this response favored the woman, negative always means it favored the
- * man — by flipping the sign on blame rows only. See the "Legend" sheet on
- * the wide export for the full explanation.
+ * Recodes one response onto a single consistent direction — positive always
+ * means this response favored the woman, negative always means it favored
+ * the man — by correcting for two independent things the raw `rating`
+ * doesn't know about:
+ *
+ * 1. scale_direction: on an as_written call the prompt's +50 slot holds the
+ *    real female's name, but on a flipped call it holds the real male's
+ *    name instead (see lib/attribution.ts's slotNames) — so a flipped
+ *    rating needs negating just to get onto a "responsibility attributed to
+ *    the real female" scale in the first place.
+ * 2. valence: +50 responsibility is favorable to her on a credit row (she
+ *    gets the reward) but unfavorable on a blame row (she gets the
+ *    reprimand) — so blame rows get a second negation on top.
+ *
+ * Matches the wide export's net_female_favor exactly (same two corrections,
+ * same order), just applied to one raw rating instead of a pre-combined
+ * woman_first/man_first pair. See the "Legend" sheet on the wide export.
  */
-function favorFemale(rating: number | null, valence: string): number | null {
-  if (rating === null) return null;
-  return valence === "blame" ? -rating : rating;
+function favorFemale(cell: AttributionCell): number | null {
+  if (cell.rating === null) return null;
+  const femaleResponsibility = cell.scale_direction === "as_written" ? cell.rating : -cell.rating;
+  return cell.valence === "blame" ? -femaleResponsibility : femaleResponsibility;
 }
 
 /** Long-format CSV matching the DMP schema (§3 Output). */
@@ -53,7 +64,7 @@ export function buildAttributionLongCsv(cells: AttributionCell[]): string {
     c.model_snapshot,
     c.rep,
     c.rating,
-    favorFemale(c.rating, c.valence),
+    favorFemale(c),
     c.raw_response,
     c.timestamp,
   ]);
