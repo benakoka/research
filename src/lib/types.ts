@@ -127,15 +127,24 @@ export interface AttributionRun {
 // Rewriting module (§4)
 // ---------------------------------------------------------------------------
 
+// One model call at one rewrite attempt for a generation. Confirmed protocol
+// (§4): a miss retries by re-reading the exact same source text again (the
+// prior generation's finished output) — never the failed attempt itself —
+// until it complies. Every attempt is kept as compliance data, not just the
+// first one.
+export interface RewriteAttempt {
+  attempt: number; // 1-based
+  text: string;
+  word_count: number;
+}
+
 export interface RewritingGeneration {
   generation: number; // 0-5, 0 = seed
-  text: string;
+  text: string; // final, compliant text (the last attempt) once status is "done"
   target_word_count: number | null; // null for generation 0 (seed)
   actual_word_count: number;
   status: CellStatus;
-  retried: boolean;
-  first_attempt_text: string | null;
-  first_attempt_word_count: number | null;
+  attempts: RewriteAttempt[]; // every attempt made; length 1 = compliant on the first try
   raw_response: string | null;
   error: string | null;
   timestamp: string | null;

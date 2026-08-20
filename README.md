@@ -160,8 +160,17 @@ from the other columns — don't type it by hand.
   model runs once) — configurable in Settings, but nothing in the app
   assumes reps > 1. The wide-format Attribution export averages across reps
   if it's ever raised.
-- Rewriting's automatic retry-on-miss threshold (default 10%) is a Settings
-  constant, not a hardcoded value.
+- Rewriting protocol (confirmed): each generation is built from the
+  *previous* generation's finished text (a true transmission chain, not five
+  independent rewrites of the seed). A miss against its word-count target (±
+  the Settings retry threshold, default 10%) retries by re-sending that exact
+  same source text again — never its own failed output — and keeps retrying
+  until it complies, up to a 10-attempt safety cap. Hitting the cap without
+  ever complying is a hard error for that generation, blocking the rest of
+  its chain rather than silently accepting non-compliant text. Every attempt
+  is kept as compliance data (`lib/types.ts`'s `RewritingGeneration.attempts`,
+  exported in the long CSV as `attempt_count`/`attempt_word_counts`/
+  `attempts_json`), not just the first one.
 - There is no spending cap or cost tracking in the app — manage budget
   limits directly in the OpenAI/Google billing dashboards.
 - Batch processing for both modules works by the client (which holds the

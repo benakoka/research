@@ -10,7 +10,6 @@ import {
   clearRewritingRun,
 } from "@/lib/clientStorage";
 import { RewritingChain, RewritingRun, VignetteSet } from "@/lib/types";
-import { missesTarget } from "@/lib/wordcount";
 
 const BATCH_SIZE = 8;
 
@@ -329,10 +328,6 @@ export default function RewritingPage() {
                       <td className="px-2 py-1 font-mono">{chain.vignette_id}</td>
                       <td className="px-2 py-1">{chain.model}</td>
                       {chain.generations.slice(1).map((gen) => {
-                        const missed =
-                          gen.status === "done" &&
-                          gen.target_word_count !== null &&
-                          missesTarget(gen.actual_word_count, gen.target_word_count, run.retryThresholdFraction);
                         const retryKey = `${chain.id}:${gen.generation}`;
                         const canRetry =
                           chain.generations[gen.generation - 1].status === "done" && gen.status !== "running";
@@ -346,9 +341,16 @@ export default function RewritingPage() {
                               </span>
                             )}
                             {gen.status === "done" && (
-                              <span className={missed ? "font-medium text-red-600" : "text-slate-700"}>
+                              <span className="text-slate-700">
                                 {gen.actual_word_count}/{gen.target_word_count}
-                                {gen.retried && "*"}
+                                {gen.attempts.length > 1 && (
+                                  <span
+                                    className="ml-1 text-slate-400"
+                                    title={`Complied after ${gen.attempts.length} attempts — each retry re-read the same source text, not its own prior attempt.`}
+                                  >
+                                    ({gen.attempts.length}×)
+                                  </span>
+                                )}
                               </span>
                             )}
                             {(gen.status === "error" || canRetry) && (
@@ -387,10 +389,19 @@ export default function RewritingPage() {
                                   {gen.generation === 0 ? "Gen0 (seed)" : `Gen${gen.generation}`}
                                 </div>
                                 <p className="whitespace-pre-wrap text-slate-600">{gen.text || "—"}</p>
-                                {gen.retried && gen.first_attempt_text && (
-                                  <p className="mt-2 text-slate-400">
-                                    First attempt ({gen.first_attempt_word_count} words): {gen.first_attempt_text}
-                                  </p>
+                                {gen.attempts.length > 1 && (
+                                  <div className="mt-2 space-y-1 border-t border-slate-100 pt-2 text-slate-400">
+                                    <p className="font-medium text-slate-500">
+                                      {gen.attempts.length - 1} earlier attempt
+                                      {gen.attempts.length - 1 === 1 ? "" : "s"} missed the target before this one
+                                      complied:
+                                    </p>
+                                    {gen.attempts.slice(0, -1).map((a) => (
+                                      <p key={a.attempt}>
+                                        Attempt {a.attempt} ({a.word_count} words): {a.text}
+                                      </p>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
                             ))}
@@ -404,7 +415,10 @@ export default function RewritingPage() {
             </table>
           </div>
           <p className="text-xs text-slate-500">
-            * = retried once after missing its target by more than the configured threshold.
+            (N×) = this generation missed its word-count target and was retried N−1 times — always
+            re-reading the same source text, never its own prior attempt — before complying. A
+            generation that never complies within 10 attempts shows as an error instead, blocking
+            the rest of that chain.
           </p>
         </>
       )}

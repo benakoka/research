@@ -2,13 +2,22 @@
 // lib/apiKeys (server env-var secrets). Only import from API routes — see
 // lib/rewriting.ts for the pure, client-safe half (building chains,
 // figuring out what's runnable next).
-import { RewritingChain, RewritingGeneration } from "./types";
+import { RewritingChain, RewritingGeneration, RewriteAttempt } from "./types";
 import { callModel, ModelCallError } from "./models";
 import { getApiKey } from "./apiKeys";
 import { buildRewritingPrompt } from "./rewriting";
-import { countWords, missesTarget } from "./wordcount";
+import { countWords, missesTarget, MAX_REWRITE_ATTEMPTS } from "./wordcount";
 
-/** Executes one generation: builds the prompt from the previous generation's output, calls the model, retries once on a large word-count miss (§4). */
+/**
+ * Executes one generation (§4, confirmed protocol): build the prompt from
+ * the previous generation's finished output, call the model, and on a miss
+ * keep retrying — re-sending that exact same source text again each time,
+ * never the failed attempt itself — until the result complies or
+ * MAX_REWRITE_ATTEMPTS is hit. Every attempt (not just the first) is kept as
+ * compliance data. Exhausting the cap without ever complying is a hard error
+ * for this generation, which blocks the rest of its chain, rather than a
+ * silent accept of non-compliant text.
+ */
 export async function executeGeneration(
   promptTemplate: string,
   retryThresholdFraction: number,
@@ -21,41 +30,34 @@ export async function executeGeneration(
   const prompt = buildRewritingPrompt(promptTemplate, target);
   const combined = `${prompt}\n\n${inputText}`;
 
+  const attempts: RewriteAttempt[] = [];
   try {
-    const first = await callModel(chain.model, apiKey, chain.model_snapshot, combined);
-    const firstWordCount = countWords(first.text);
+    for (let attemptNum = 1; attemptNum <= MAX_REWRITE_ATTEMPTS; attemptNum++) {
+      const result = await callModel(chain.model, apiKey, chain.model_snapshot, combined);
+      const wordCount = countWords(result.text);
+      attempts.push({ attempt: attemptNum, text: result.text, word_count: wordCount });
 
-    if (missesTarget(firstWordCount, target, retryThresholdFraction)) {
-      // Retry once automatically on a large miss — keep the first attempt's
-      // data rather than discarding it, it's compliance data too (§4).
-      const retry = await callModel(chain.model, apiKey, chain.model_snapshot, combined);
-      const retryWordCount = countWords(retry.text);
-      return {
-        generation: genIndex,
-        text: retry.text,
-        target_word_count: target,
-        actual_word_count: retryWordCount,
-        status: "done",
-        retried: true,
-        first_attempt_text: first.text,
-        first_attempt_word_count: firstWordCount,
-        raw_response: retry.text,
-        error: null,
-        timestamp: new Date().toISOString(),
-      };
+      if (!missesTarget(wordCount, target, retryThresholdFraction)) {
+        return {
+          generation: genIndex,
+          text: result.text,
+          target_word_count: target,
+          actual_word_count: wordCount,
+          status: "done",
+          attempts,
+          raw_response: result.text,
+          error: null,
+          timestamp: new Date().toISOString(),
+        };
+      }
     }
 
+    const last = attempts[attempts.length - 1];
     return {
-      generation: genIndex,
-      text: first.text,
-      target_word_count: target,
-      actual_word_count: firstWordCount,
-      status: "done",
-      retried: false,
-      first_attempt_text: null,
-      first_attempt_word_count: null,
-      raw_response: first.text,
-      error: null,
+      ...chain.generations[genIndex],
+      status: "error",
+      attempts,
+      error: `Never reached the target word count (${target} ±${Math.round(retryThresholdFraction * 100)}%) in ${MAX_REWRITE_ATTEMPTS} attempts. Last attempt: ${last.word_count} words.`,
       timestamp: new Date().toISOString(),
     };
   } catch (err) {
@@ -63,6 +65,7 @@ export async function executeGeneration(
     return {
       ...chain.generations[genIndex],
       status: "error",
+      attempts,
       error: message,
       timestamp: new Date().toISOString(),
     };

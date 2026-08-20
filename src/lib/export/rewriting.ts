@@ -2,11 +2,13 @@ import ExcelJS from "exceljs";
 import { RewritingChain } from "@/lib/types";
 import { toCsv } from "@/lib/csv";
 
-// The core columns exactly match the DMP schema in §4 Output. `retried` and
-// `first_attempt_word_count`/`first_attempt_text` are additive trailing
-// columns — the spec requires recording the first attempt's word count
-// rather than discarding it (§4) without redefining what `generation` means,
-// so it's appended rather than injected as an extra synthetic row.
+// The core columns exactly match the DMP schema in §4 Output. `attempt_count`
+// and `attempt_word_counts` are additive trailing columns — the confirmed
+// protocol is retry-until-compliant (re-reading the same source text each
+// time, not the failed attempt), so every attempt's word count is compliance
+// data worth keeping, not just a single first-vs-retry pair. Full per-attempt
+// text lives in `attempts_json` rather than as one column per attempt, since
+// the number of attempts varies per generation.
 const LONG_HEADERS = [
   "chain_id",
   "vignette_id",
@@ -21,9 +23,9 @@ const LONG_HEADERS = [
   "target_word_count",
   "actual_word_count",
   "timestamp",
-  "retried",
-  "first_attempt_word_count",
-  "first_attempt_text",
+  "attempt_count",
+  "attempt_word_counts",
+  "attempts_json",
 ] as const;
 
 /** Long-format CSV (§4 Output). One row per generation (0-5, 0=seed) per chain. */
@@ -45,9 +47,9 @@ export function buildRewritingLongCsv(chains: RewritingChain[]): string {
         gen.target_word_count,
         gen.actual_word_count,
         gen.timestamp,
-        gen.retried ? "true" : "false",
-        gen.first_attempt_word_count,
-        gen.first_attempt_text,
+        gen.attempts.length,
+        gen.attempts.map((a) => a.word_count).join(";"),
+        gen.attempts.length > 0 ? JSON.stringify(gen.attempts) : null,
       ]);
     }
   }
