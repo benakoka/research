@@ -13,6 +13,15 @@ import {
 const MODELS: ModelProvider[] = ["GPT", "Gemini"];
 const DIRECTIONS: ScaleDirection[] = ["as_written", "flipped"];
 
+/**
+ * Models were told to "Respond with only the number" but occasionally answer
+ * with no parseable number at all (declines, commentary with no digits,
+ * etc.). Rather than surfacing that as a cell needing a manual retry click,
+ * lib/attributionExec.ts retries automatically — same call, fresh attempt —
+ * up to this many times before giving up and marking the cell an error.
+ */
+export const MAX_RATING_PARSE_ATTEMPTS = 10;
+
 /** Which name fills the [FEMALE NAME]/[MALE NAME] slots for a given scale direction (§3). */
 function slotNames(row: VignetteRow, direction: ScaleDirection) {
   if (direction === "as_written") {
