@@ -89,6 +89,7 @@ const WIDE_HEADERS = [
   "Gemini_net_rating_unadjusted",
   "Gemini_net_female_favor",
   "Combined_net_female_favor",
+  "Gender_residual",
 ] as const;
 
 function average(values: number[]): number | null {
@@ -139,8 +140,12 @@ function addAttributionLegendSheet(workbook: ExcelJS.Workbook) {
       "= the average of GPT_net_female_favor and Gemini_net_female_favor (both already valence-corrected) — one number for how the two models net out together on this story. If only one model has a value for a row (the other errored), this is just that one value rather than going blank.",
     ],
     [
+      "Gender_residual",
+      "= the average of Combined_net_female_favor across a scenario's A and B order_variant rows (same value on both rows of the pair — it's a scenario-level number, not a per-row one). order_variant A and B keep the same two real people but swap which one holds which narrative role (see order_variant above) — so an effect that's really about the ROLE (the model favoring whichever person holds a given role, regardless of gender) points in opposite directions on the A row vs. the B row and cancels out toward 0 when averaged. An effect that's really about GENDER (the model favoring the same person regardless of which role they hold) points the same direction on both rows and survives the average unchanged. Gender_residual is the best single estimate of whether a vignette has a real, role-independent gender lean — the number to check first when asking \"does this vignette show a real directional lean.\" Same null-handling as Combined_net_female_favor: averages whichever of the pair is actually available rather than going blank.",
+    ],
+    [
       "Color scale",
-      "Applied only to the two corrected columns (GPT_net_female_favor, Gemini_net_female_favor) and Combined_net_female_favor — deliberately not applied to the unadjusted columns, so color only ever marks the direction that's actually comparable across credit and blame rows. Red = favored the man, white = neutral (0), green = favored the woman.",
+      "Applied to the corrected columns (GPT_net_female_favor, Gemini_net_female_favor), Combined_net_female_favor, and Gender_residual — deliberately not applied to the unadjusted columns, so color only ever marks a direction that's actually comparable across credit/blame and, for Gender_residual, across A/B role assignment too. Red = favored the man, white = neutral (0), green = favored the woman.",
     ],
   ];
 
@@ -166,19 +171,25 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
     byVignette.get(c.vignette_id)!.push(c);
   }
 
-  const workbook = new ExcelJS.Workbook();
-  // Data sheet added first so it's what's active when the file opens — the
-  // legend (added below) is there to be checked, not the first thing seen
-  // every time.
-  const sheet = workbook.addWorksheet("Attribution (wide view)");
-  sheet.addRow([...WIDE_HEADERS]);
-  sheet.getRow(1).font = { bold: true };
+  // Pass 1: compute every row's own numbers first, without writing them to
+  // the sheet yet — Gender_residual needs to see both the A and B row of a
+  // scenario before either row can be finalized, so nothing gets written
+  // until pass 2.
+  interface RowData {
+    vignetteId: string;
+    first: AttributionCell;
+    gptWoman: number | null;
+    gptMan: number | null;
+    gptNetUnadjusted: number | null;
+    gptNet: number | null;
+    gemWoman: number | null;
+    gemMan: number | null;
+    gemNetUnadjusted: number | null;
+    gemNet: number | null;
+    combinedNet: number | null;
+  }
 
-  // GPT_net_female_favor, Gemini_net_female_favor, Combined_net_female_favor —
-  // the valence-corrected columns only. The unadjusted net columns (J, N)
-  // are deliberately left uncolored; see the Legend's "Color scale" entry.
-  const netFavorCols = ["K", "O", "P"] as const;
-
+  const rowsData: RowData[] = [];
   for (const [vignetteId, group] of byVignette) {
     const first = group[0];
     const ratingsFor = (model: "GPT" | "Gemini", direction: "as_written" | "flipped") =>
@@ -206,14 +217,9 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
     // than going blank just because one model errored on this row.
     const combinedNet = average([gptNet, gemNet].filter((n): n is number => n !== null));
 
-    sheet.addRow([
+    rowsData.push({
       vignetteId,
-      first.domain,
-      first.valence,
-      first.order_variant,
-      first.female_name,
-      first.male_name,
-      first.vignette_text,
+      first,
       gptWoman,
       gptMan,
       gptNetUnadjusted,
@@ -223,6 +229,62 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
       gemNetUnadjusted,
       gemNet,
       combinedNet,
+    });
+  }
+
+  // Pass 2: group rows into A/B pairs by the same key used for the upload's
+  // A/B soft-check (lib/vignettes.ts) — domain+valence+scenario_number,
+  // independent of order_variant — so Gender_residual can average
+  // Combined_net_female_favor across both. female_name/male_name stay the
+  // same real people across A and B (only which role they hold flips), so
+  // no extra sign correction is needed here — both rows already favor the
+  // same specific person consistently.
+  const pairKey = (r: RowData) => `${r.first.domain}::${r.first.valence}::${r.first.scenario_number}`;
+  const byPair = new Map<string, RowData[]>();
+  for (const r of rowsData) {
+    const key = pairKey(r);
+    if (!byPair.has(key)) byPair.set(key, []);
+    byPair.get(key)!.push(r);
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  // Data sheet added first so it's what's active when the file opens — the
+  // legend (added below) is there to be checked, not the first thing seen
+  // every time.
+  const sheet = workbook.addWorksheet("Attribution (wide view)");
+  sheet.addRow([...WIDE_HEADERS]);
+  sheet.getRow(1).font = { bold: true };
+
+  // GPT_net_female_favor, Gemini_net_female_favor, Combined_net_female_favor,
+  // Gender_residual — the valence-corrected/role-corrected columns only. The
+  // unadjusted net columns (J, N) are deliberately left uncolored; see the
+  // Legend's "Color scale" entry.
+  const netFavorCols = ["K", "O", "P", "Q"] as const;
+
+  for (const row of rowsData) {
+    const pairGroup = byPair.get(pairKey(row))!;
+    const genderResidual = average(
+      pairGroup.map((r) => r.combinedNet).filter((n): n is number => n !== null)
+    );
+
+    sheet.addRow([
+      row.vignetteId,
+      row.first.domain,
+      row.first.valence,
+      row.first.order_variant,
+      row.first.female_name,
+      row.first.male_name,
+      row.first.vignette_text,
+      row.gptWoman,
+      row.gptMan,
+      row.gptNetUnadjusted,
+      row.gptNet,
+      row.gemWoman,
+      row.gemMan,
+      row.gemNetUnadjusted,
+      row.gemNet,
+      row.combinedNet,
+      genderResidual,
     ]);
   }
 
