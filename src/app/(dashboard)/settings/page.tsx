@@ -7,7 +7,10 @@ import { Settings } from "@/lib/types";
 interface KeyStatus {
   openaiApiKeyMasked: string | null;
   geminiApiKeyMasked: string | null;
-  testMode: boolean;
+  // Independent per slot — USE_CLAUDE_FOR_TESTING can cover just GPT or just
+  // Gemini while the other already has a real key.
+  gptTestMode: boolean;
+  geminiTestMode: boolean;
 }
 
 function Field({
@@ -92,6 +95,20 @@ export default function SettingsPage() {
     return <p className="text-sm text-slate-500">Loading…</p>;
   }
 
+  // Which slot(s) are currently routed through Claude — independent per
+  // slot, since USE_CLAUDE_FOR_TESTING can cover just one of the two.
+  const testModeSlots: ("GPT" | "Gemini")[] = keyStatus
+    ? [
+        ...(keyStatus.gptTestMode ? (["GPT"] as const) : []),
+        ...(keyStatus.geminiTestMode ? (["Gemini"] as const) : []),
+      ]
+    : [];
+  const anyTestMode = testModeSlots.length > 0;
+  const slotsLabel =
+    testModeSlots.length === 2
+      ? `the "GPT" and "Gemini" slots`
+      : `the "${testModeSlots[0]}" slot`;
+
   function saveAll() {
     if (!data) return;
     setData(saveSettings(data));
@@ -114,14 +131,18 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {keyStatus?.testMode && (
+      {anyTestMode && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          ⚠ <strong>Test mode is on</strong> (<code>USE_CLAUDE_FOR_TESTING=true</code>).
-          Both the &quot;GPT&quot; and &quot;Gemini&quot; slots below are actually calling
-          Claude via <code>ANTHROPIC_API_KEY</code> — type a real Claude model ID (e.g.{" "}
-          <code>claude-haiku-4-5-20251001</code>) into both model snapshot fields for this
-          to work. This is for exercising the upload → run → export pipeline only — Claude
-          output is not a substitute for real GPT/Gemini data.
+          ⚠ <strong>Test mode is on</strong> for {slotsLabel} (<code>USE_CLAUDE_FOR_TESTING</code>
+          {testModeSlots.length === 2 ? "=true" : `=${testModeSlots[0]!.toLowerCase()}`}).{" "}
+          {slotsLabel[0].toUpperCase() + slotsLabel.slice(1)} below{" "}
+          {testModeSlots.length === 2 ? "are" : "is"} actually calling Claude via{" "}
+          <code>ANTHROPIC_API_KEY</code> — type a real Claude model ID (e.g.{" "}
+          <code>claude-haiku-4-5-20251001</code>) into{" "}
+          {testModeSlots.length === 2 ? "both model snapshot fields" : "that model snapshot field"}{" "}
+          for this to work. This is for exercising the upload → run → export pipeline only —
+          Claude output is not a substitute for real{" "}
+          {testModeSlots.length === 2 ? "GPT/Gemini" : testModeSlots[0]} data.
         </div>
       )}
 
@@ -143,20 +164,24 @@ export default function SettingsPage() {
             <div className="text-slate-600">
               {keyStatus?.openaiApiKeyMasked ? `Configured (${keyStatus.openaiApiKeyMasked})` : "Not set"}
             </div>
+            {keyStatus?.gptTestMode && (
+              <div className="mt-1 text-xs text-amber-700">
+                Test mode is on for GPT, so this actually reflects <code>ANTHROPIC_API_KEY</code>.
+              </div>
+            )}
           </div>
           <div className="rounded-md bg-slate-50 p-3">
             <div className="font-medium text-slate-700">Gemini</div>
             <div className="text-slate-600">
               {keyStatus?.geminiApiKeyMasked ? `Configured (${keyStatus.geminiApiKeyMasked})` : "Not set"}
             </div>
+            {keyStatus?.geminiTestMode && (
+              <div className="mt-1 text-xs text-amber-700">
+                Test mode is on for Gemini, so this actually reflects <code>ANTHROPIC_API_KEY</code>.
+              </div>
+            )}
           </div>
         </div>
-        {keyStatus?.testMode && (
-          <p className="mt-3 text-xs text-amber-700">
-            Test mode is on, so both cards above actually reflect{" "}
-            <code>ANTHROPIC_API_KEY</code>, not the OpenAI/Gemini keys.
-          </p>
-        )}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6">
@@ -165,10 +190,11 @@ export default function SettingsPage() {
           Free text, used for every API call in both modules. There is no
           default baked in — flagship versions cycle too often for that.
         </p>
-        {keyStatus?.testMode && (
+        {anyTestMode && (
           <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
             <span>
-              Test mode suggestion — paste this into both fields below:{" "}
+              Test mode suggestion — paste this into{" "}
+              {testModeSlots.length === 2 ? "both fields below" : `the ${testModeSlots[0]} field below`}:{" "}
               <code className="rounded bg-white px-1.5 py-0.5">{SUGGESTED_TEST_MODEL}</code>
             </span>
             <button
@@ -179,7 +205,11 @@ export default function SettingsPage() {
             </button>
           </div>
         )}
-        <Field label="GPT model snapshot" htmlFor="gpt-model-snapshot" hint="e.g. gpt-5.2">
+        <Field
+          label="GPT model snapshot"
+          htmlFor="gpt-model-snapshot"
+          hint={keyStatus?.gptTestMode ? "Test mode: enter a Claude model ID here, not a GPT one." : "e.g. gpt-5.2"}
+        >
           <input
             id="gpt-model-snapshot"
             aria-describedby="gpt-model-snapshot-hint"
@@ -188,7 +218,13 @@ export default function SettingsPage() {
             className={inputClass + " font-mono"}
           />
         </Field>
-        <Field label="Gemini model snapshot" htmlFor="gemini-model-snapshot" hint="e.g. gemini-3-pro">
+        <Field
+          label="Gemini model snapshot"
+          htmlFor="gemini-model-snapshot"
+          hint={
+            keyStatus?.geminiTestMode ? "Test mode: enter a Claude model ID here, not a Gemini one." : "e.g. gemini-3-pro"
+          }
+        >
           <input
             id="gemini-model-snapshot"
             aria-describedby="gemini-model-snapshot-hint"

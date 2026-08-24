@@ -12,6 +12,9 @@ export const GET = withApiErrorHandling(async () => {
   return NextResponse.json({
     openaiApiKeyMasked: maskSecret(getApiKey("GPT")),
     geminiApiKeyMasked: maskSecret(getApiKey("Gemini")),
-    testMode: isTestMode(),
+    // Reported per-slot — USE_CLAUDE_FOR_TESTING can cover just one of the
+    // two (e.g. "gemini") while the other already has a real key.
+    gptTestMode: isTestMode("GPT"),
+    geminiTestMode: isTestMode("Gemini"),
   });
 });

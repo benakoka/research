@@ -45,11 +45,13 @@ export async function callModel(
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      // TEST MODE: both providers route through Claude on one Anthropic key
-      // so the pipeline can be exercised before real OpenAI/Gemini budget
-      // exists. Swapping this off (unset USE_CLAUDE_FOR_TESTING) restores
-      // the normal GPT/Gemini dispatch with no other code changes needed.
-      const result = isTestMode()
+      // TEST MODE: a provider in test mode routes through Claude on the
+      // Anthropic key instead of its own, so that slot's pipeline can be
+      // exercised before its real budget exists — independently of whether
+      // the other slot already has a real key (see lib/apiKeys.ts). Taking a
+      // slot out of test mode (its own USE_CLAUDE_FOR_TESTING case) restores
+      // normal dispatch for it with no other code changes needed.
+      const result = isTestMode(provider)
         ? await callAnthropic(apiKey, modelSnapshot, prompt)
         : provider === "GPT"
           ? await callOpenAI(apiKey, modelSnapshot, prompt)
