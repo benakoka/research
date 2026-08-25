@@ -19,6 +19,18 @@ import { EtaSample, estimateEtaSeconds, formatEta, pushEtaSample } from "@/lib/e
 // progress more often and bounds how much a single slow generation can hold
 // up.
 const BATCH_SIZE = 4;
+// How many /process requests driveRun keeps in flight at once (see the
+// worker-pool loop below). This is the main lever for total run time: each
+// request is still only ever BATCH_SIZE generations (so one slow one still
+// only risks holding up BATCH_SIZE-1 others, same as before), but
+// WORKER_COUNT such requests now run concurrently instead of one at a
+// time — a large run's wall-clock time is dominated by how many calls have
+// to happen serially, not by any single call's latency. 3 was picked as a
+// first step: meaningfully faster without pushing so much simultaneous load
+// at GPT/Gemini that rate limits (429s) start showing up instead. Raise it
+// if a real run comes back clean with no new rate-limit errors; lower it if
+// one does.
+const WORKER_COUNT = 3;
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -59,14 +71,17 @@ export default function RewritingPage() {
   // exports (or dismisses it deliberately), not just flash by.
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const runningRef = useRef(false);
-  // Checked at the top of every driveRun loop iteration (between batches) so
+  // Checked at the top of every worker loop iteration (between batches) so
   // Cancel takes effect even if a batch happens to already be in flight when
-  // it's clicked. abortControllerRef additionally kills whatever batch
-  // request is actually in flight right now, so Cancel doesn't have to wait
+  // it's clicked. abortControllersRef additionally kills every batch
+  // request actually in flight right now, so Cancel doesn't have to wait
   // out a slow/retrying batch (up to ~a minute with the model-call retry
   // policy) before doing anything.
   const cancelRequestedRef = useRef(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // A Set instead of a single ref now that multiple batch requests can be
+  // in flight at once (see WORKER_COUNT) — Cancel needs to abort all of
+  // them, not just the most recent one.
+  const abortControllersRef = useRef<Set<AbortController>>(new Set());
   // Throughput history for the "estimated time remaining" display — see
   // lib/eta.ts. Reset at the start of every driveRun call (fresh run,
   // resume, or a single-generation retry cascade) so a slow/fast earlier
@@ -118,42 +133,92 @@ export default function RewritingPage() {
     // shouldn't count toward this call's measured rate.
     etaSamplesRef.current = [{ t: Date.now(), n: completedCount(current.chains) }];
     setEtaSeconds(null);
-    try {
-      let working = current;
+
+    // `working` is shared, mutable state read and written by every worker
+    // below. That's safe without a real lock only because every read-claim-
+    // write sequence here runs synchronously, with no `await` in between —
+    // JS never interleaves two synchronous stretches of code, so two
+    // workers can never both claim the same chain's runnable generation
+    // (marking it "running" makes nextRunnableGenerationIndex return null
+    // for that chain until it resolves). Everything after the `await
+    // processBatch(...)` line re-reads `working` fresh (it may have been
+    // updated by another worker while this one was in flight) and merges
+    // this worker's results on top of that latest state, so no worker's
+    // update is ever lost.
+    let working = current;
+    let fatalError: unknown = null;
+
+    async function worker() {
       while (true) {
-        if (cancelRequestedRef.current) {
-          persist({ ...working, status: "cancelled" });
-          return;
-        }
-        const runnable = working.chains.filter((c) => nextRunnableGenerationIndex(c) !== null).slice(0, BATCH_SIZE);
-        if (runnable.length === 0) break;
+        if (cancelRequestedRef.current || fatalError) return;
+        const claim = working.chains
+          .map((chain) => ({ chain, genIndex: nextRunnableGenerationIndex(chain) }))
+          .filter((x): x is { chain: RewritingChain; genIndex: number } => x.genIndex !== null)
+          .slice(0, BATCH_SIZE);
+        if (claim.length === 0) return;
+
+        const genIndexByChainId = new Map(claim.map((x) => [x.chain.id, x.genIndex]));
+        working = {
+          ...working,
+          chains: working.chains.map((c) => {
+            const genIndex = genIndexByChainId.get(c.id);
+            if (genIndex === undefined) return c;
+            const generations = [...c.generations];
+            generations[genIndex] = { ...generations[genIndex], status: "running" };
+            return { ...c, generations };
+          }),
+        };
 
         const controller = new AbortController();
-        abortControllerRef.current = controller;
+        abortControllersRef.current.add(controller);
         let results: RewritingChain[];
         try {
-          results = await processBatch(runnable, working.promptTemplate, working.retryThresholdFraction, controller.signal);
+          results = await processBatch(
+            claim.map((x) => x.chain),
+            working.promptTemplate,
+            working.retryThresholdFraction,
+            controller.signal
+          );
         } catch (err) {
-          if (err instanceof DOMException && err.name === "AbortError") {
-            persist({ ...working, status: "cancelled" });
-            return;
-          }
-          throw err;
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          // A genuine failure (not a user-requested cancel) should stop the
+          // whole run, not just this worker — record it and tell the other
+          // workers to wind down too, same as a cancel would.
+          fatalError = err;
+          cancelRequestedRef.current = true;
+          for (const c of abortControllersRef.current) c.abort();
+          return;
         } finally {
-          abortControllerRef.current = null;
+          abortControllersRef.current.delete(controller);
         }
 
         const byId = new Map(results.map((c) => [c.id, c]));
-        const chains = working.chains.map((c) => byId.get(c.id) ?? c);
-        working = { ...working, status: "running", chains };
+        working = { ...working, status: "running", chains: working.chains.map((c) => byId.get(c.id) ?? c) };
         persist(working);
 
-        const stats = overallStats(chains);
+        const stats = overallStats(working.chains);
         etaSamplesRef.current = pushEtaSample(etaSamplesRef.current, { t: Date.now(), n: stats.done + stats.error });
         setEtaSeconds(estimateEtaSeconds(etaSamplesRef.current, stats.pending + stats.running));
       }
-      const done = { ...working, status: "done" as const };
-      persist(done);
+    }
+
+    try {
+      await Promise.all(Array.from({ length: WORKER_COUNT }, () => worker()));
+      if (cancelRequestedRef.current && !fatalError) {
+        // Any generation a worker claimed (marked "running") but never got
+        // a response for — because its request was aborted mid-flight —
+        // needs to go back to "pending", the same convention used on
+        // resume, otherwise it'd block its chain forever and be missing
+        // from both the pending and completed counts.
+        const chains = working.chains.map((c) => ({
+          ...c,
+          generations: c.generations.map((g) => (g.status === "running" ? { ...g, status: "pending" as const } : g)),
+        }));
+        persist({ ...working, chains, status: "cancelled" });
+        return;
+      }
+      if (fatalError) throw fatalError;
+      persist({ ...working, status: "done" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Batch failed.");
     } finally {
@@ -171,7 +236,7 @@ export default function RewritingPage() {
     )
       return;
     cancelRequestedRef.current = true;
-    abortControllerRef.current?.abort();
+    for (const c of abortControllersRef.current) c.abort();
   }
 
   useEffect(() => {

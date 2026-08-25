@@ -19,6 +19,19 @@ import { EtaSample, estimateEtaSeconds, formatEta, pushEtaSample } from "@/lib/e
 // Gemini taking close to its 45s timeout) — a smaller batch surfaces
 // progress more often and bounds how much a single slow cell can hold up.
 const BATCH_SIZE = 4;
+// How many /process requests driveRun keeps in flight at once (see the
+// worker-pool loop below). This is the main lever for total run time: each
+// request is still only ever BATCH_SIZE cells (so one slow cell still only
+// risks holding up BATCH_SIZE-1 others, same as before), but WORKER_COUNT
+// such requests now run concurrently instead of one at a time, which is
+// where most of a large run's wall-clock time actually goes — a run isn't
+// bound by any single call's latency, it's bound by how many calls have to
+// happen serially before every cell's done. 3 was picked as a first step:
+// meaningfully faster without pushing so much simultaneous load at GPT/
+// Gemini that rate limits (429s) start showing up instead. Raise it if a
+// real run comes back clean with no new rate-limit errors; lower it if one
+// does.
+const WORKER_COUNT = 3;
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -48,14 +61,17 @@ export default function AttributionPage() {
   // exports (or dismisses it deliberately), not just flash by.
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const runningRef = useRef(false);
-  // Checked at the top of every driveRun loop iteration (between batches) so
+  // Checked at the top of every worker loop iteration (between batches) so
   // Cancel takes effect even if a batch happens to already be in flight when
-  // it's clicked. abortControllerRef additionally kills whatever batch
-  // request is actually in flight right now, so Cancel doesn't have to wait
+  // it's clicked. abortControllersRef additionally kills every batch
+  // request actually in flight right now, so Cancel doesn't have to wait
   // out a slow/retrying batch (up to ~a minute with the model-call retry
   // policy) before doing anything.
   const cancelRequestedRef = useRef(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // A Set instead of a single ref now that multiple batch requests can be
+  // in flight at once (see WORKER_COUNT) — Cancel needs to abort all of
+  // them, not just the most recent one.
+  const abortControllersRef = useRef<Set<AbortController>>(new Set());
   // Throughput history for the "estimated time remaining" display — see
   // lib/eta.ts. Reset at the start of every driveRun call (fresh run or
   // resume) so a slow/fast earlier session never pollutes a new one.
@@ -99,42 +115,73 @@ export default function AttributionPage() {
     // shouldn't count toward this session's measured rate.
     etaSamplesRef.current = [{ t: Date.now(), n: completedCount(current.cells) }];
     setEtaSeconds(null);
-    try {
-      let working = current;
+
+    // `working` is shared, mutable state read and written by every worker
+    // below. That's safe without a real lock only because every read-claim-
+    // write sequence here runs synchronously, with no `await` in between —
+    // JS never interleaves two synchronous stretches of code, so two
+    // workers can never both claim the same pending cell. Everything after
+    // the `await processBatch(...)` line re-reads `working` fresh (it may
+    // have been updated by another worker while this one was in flight) and
+    // merges this worker's results on top of that latest state, so no
+    // worker's update is ever lost.
+    let working = current;
+    let fatalError: unknown = null;
+
+    async function worker() {
       while (true) {
-        if (cancelRequestedRef.current) {
-          persist({ ...working, status: "cancelled" });
-          return;
-        }
-        const pending = working.cells.filter((c) => c.status === "pending").slice(0, BATCH_SIZE);
-        if (pending.length === 0) break;
+        if (cancelRequestedRef.current || fatalError) return;
+        const claim = working.cells.filter((c) => c.status === "pending").slice(0, BATCH_SIZE);
+        if (claim.length === 0) return;
+
+        const claimIds = new Set(claim.map((c) => c.id));
+        working = {
+          ...working,
+          cells: working.cells.map((c) => (claimIds.has(c.id) ? { ...c, status: "running" as const } : c)),
+        };
 
         const controller = new AbortController();
-        abortControllerRef.current = controller;
+        abortControllersRef.current.add(controller);
         let results: AttributionCell[];
         try {
-          results = await processBatch(pending, working.promptTemplate, controller.signal);
+          results = await processBatch(claim, working.promptTemplate, controller.signal);
         } catch (err) {
-          if (err instanceof DOMException && err.name === "AbortError") {
-            persist({ ...working, status: "cancelled" });
-            return;
-          }
-          throw err;
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          // A genuine failure (not a user-requested cancel) should stop the
+          // whole run, not just this worker — record it and tell the other
+          // workers to wind down too, same as a cancel would.
+          fatalError = err;
+          cancelRequestedRef.current = true;
+          for (const c of abortControllersRef.current) c.abort();
+          return;
         } finally {
-          abortControllerRef.current = null;
+          abortControllersRef.current.delete(controller);
         }
 
         const byId = new Map(results.map((c) => [c.id, c]));
-        const cells = working.cells.map((c) => byId.get(c.id) ?? c);
-        working = { ...working, status: "running", cells };
+        working = { ...working, status: "running", cells: working.cells.map((c) => byId.get(c.id) ?? c) };
         persist(working);
 
-        const n = completedCount(cells);
+        const n = completedCount(working.cells);
         etaSamplesRef.current = pushEtaSample(etaSamplesRef.current, { t: Date.now(), n });
-        setEtaSeconds(estimateEtaSeconds(etaSamplesRef.current, cells.length - n));
+        setEtaSeconds(estimateEtaSeconds(etaSamplesRef.current, working.cells.length - n));
       }
-      const done = { ...working, status: "done" as const };
-      persist(done);
+    }
+
+    try {
+      await Promise.all(Array.from({ length: WORKER_COUNT }, () => worker()));
+      if (cancelRequestedRef.current && !fatalError) {
+        // Any cell a worker claimed (marked "running") but never got a
+        // response for — because its request was aborted mid-flight — needs
+        // to go back to "pending", the same convention used on resume,
+        // otherwise it'd show as permanently "running" and be missing from
+        // both the pending and completed counts.
+        const cells = working.cells.map((c) => (c.status === "running" ? { ...c, status: "pending" as const } : c));
+        persist({ ...working, cells, status: "cancelled" });
+        return;
+      }
+      if (fatalError) throw fatalError;
+      persist({ ...working, status: "done" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Batch failed.");
     } finally {
@@ -152,7 +199,7 @@ export default function AttributionPage() {
     )
       return;
     cancelRequestedRef.current = true;
-    abortControllerRef.current?.abort();
+    for (const c of abortControllersRef.current) c.abort();
   }
 
   useEffect(() => {
