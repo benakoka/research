@@ -10,6 +10,7 @@ import {
   clearRewritingRun,
 } from "@/lib/clientStorage";
 import { RewritingChain, RewritingRun, VignetteSet } from "@/lib/types";
+import { EtaSample, estimateEtaSeconds, formatEta, pushEtaSample } from "@/lib/eta";
 
 // Kept small deliberately: Promise.all in the /process route waits for the
 // slowest generation in a batch, so a larger batch means more concurrent
@@ -66,6 +67,17 @@ export default function RewritingPage() {
   // policy) before doing anything.
   const cancelRequestedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Throughput history for the "estimated time remaining" display — see
+  // lib/eta.ts. Reset at the start of every driveRun call (fresh run,
+  // resume, or a single-generation retry cascade) so a slow/fast earlier
+  // session never pollutes a new one.
+  const etaSamplesRef = useRef<EtaSample[]>([]);
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
+
+  function completedCount(chains: RewritingChain[]) {
+    const stats = overallStats(chains);
+    return stats.done + stats.error;
+  }
 
   function persist(updated: RewritingRun) {
     setRun(updated);
@@ -100,6 +112,12 @@ export default function RewritingPage() {
     setProcessing(true);
     setError(null);
     cancelRequestedRef.current = false;
+    // Seed with "now, at whatever's already done" — matters for a resumed
+    // run (page refresh mid-run) and for a retry cascade kicked off from an
+    // otherwise-finished run, where generations completed before this call
+    // shouldn't count toward this call's measured rate.
+    etaSamplesRef.current = [{ t: Date.now(), n: completedCount(current.chains) }];
+    setEtaSeconds(null);
     try {
       let working = current;
       while (true) {
@@ -129,6 +147,10 @@ export default function RewritingPage() {
         const chains = working.chains.map((c) => byId.get(c.id) ?? c);
         working = { ...working, status: "running", chains };
         persist(working);
+
+        const stats = overallStats(chains);
+        etaSamplesRef.current = pushEtaSample(etaSamplesRef.current, { t: Date.now(), n: stats.done + stats.error });
+        setEtaSeconds(estimateEtaSeconds(etaSamplesRef.current, stats.pending + stats.running));
       }
       const done = { ...working, status: "done" as const };
       persist(done);
@@ -137,6 +159,7 @@ export default function RewritingPage() {
     } finally {
       runningRef.current = false;
       setProcessing(false);
+      setEtaSeconds(null);
     }
   }
 
@@ -344,7 +367,12 @@ export default function RewritingPage() {
             </div>
             {processing && (
               <div className="mt-1 flex items-center gap-2">
-                <p className="text-xs text-slate-500">Processing batches…</p>
+                <p className="text-xs text-slate-500">
+                  Processing batches…{" "}
+                  {etaSeconds !== null
+                    ? `estimated time remaining: ~${formatEta(etaSeconds)}`
+                    : "estimating time remaining…"}
+                </p>
                 <button onClick={cancelRun} className="text-xs font-medium text-red-600 underline hover:text-red-800">
                   Cancel
                 </button>

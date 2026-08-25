@@ -11,6 +11,7 @@ import {
 } from "@/lib/clientStorage";
 import { AttributionCell, AttributionRun, VignetteSet } from "@/lib/types";
 import { summarizeProgress } from "@/lib/progress";
+import { EtaSample, estimateEtaSeconds, formatEta, pushEtaSample } from "@/lib/eta";
 
 // Kept small deliberately: Promise.all in the /process route waits for the
 // slowest cell in a batch, so a larger batch means more concurrent cells
@@ -55,6 +56,15 @@ export default function AttributionPage() {
   // policy) before doing anything.
   const cancelRequestedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Throughput history for the "estimated time remaining" display — see
+  // lib/eta.ts. Reset at the start of every driveRun call (fresh run or
+  // resume) so a slow/fast earlier session never pollutes a new one.
+  const etaSamplesRef = useRef<EtaSample[]>([]);
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
+
+  function completedCount(cells: AttributionCell[]) {
+    return cells.filter((c) => c.status === "done" || c.status === "error").length;
+  }
 
   function persist(updated: AttributionRun) {
     setRun(updated);
@@ -84,6 +94,11 @@ export default function AttributionPage() {
     setProcessing(true);
     setError(null);
     cancelRequestedRef.current = false;
+    // Seed with "now, at whatever's already done" — matters for a resumed
+    // run (page refresh mid-run), where cells completed in a prior session
+    // shouldn't count toward this session's measured rate.
+    etaSamplesRef.current = [{ t: Date.now(), n: completedCount(current.cells) }];
+    setEtaSeconds(null);
     try {
       let working = current;
       while (true) {
@@ -113,6 +128,10 @@ export default function AttributionPage() {
         const cells = working.cells.map((c) => byId.get(c.id) ?? c);
         working = { ...working, status: "running", cells };
         persist(working);
+
+        const n = completedCount(cells);
+        etaSamplesRef.current = pushEtaSample(etaSamplesRef.current, { t: Date.now(), n });
+        setEtaSeconds(estimateEtaSeconds(etaSamplesRef.current, cells.length - n));
       }
       const done = { ...working, status: "done" as const };
       persist(done);
@@ -121,6 +140,7 @@ export default function AttributionPage() {
     } finally {
       runningRef.current = false;
       setProcessing(false);
+      setEtaSeconds(null);
     }
   }
 
@@ -322,7 +342,12 @@ export default function AttributionPage() {
             </div>
             {processing && (
               <div className="mt-1 flex items-center gap-2">
-                <p className="text-xs text-slate-500">Processing batches…</p>
+                <p className="text-xs text-slate-500">
+                  Processing batches…{" "}
+                  {etaSeconds !== null
+                    ? `estimated time remaining: ~${formatEta(etaSeconds)}`
+                    : "estimating time remaining…"}
+                </p>
                 <button onClick={cancelRun} className="text-xs font-medium text-red-600 underline hover:text-red-800">
                   Cancel
                 </button>
