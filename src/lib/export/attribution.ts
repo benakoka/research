@@ -81,15 +81,16 @@ const WIDE_HEADERS = [
   "male_name",
   "vignette_text",
   "GPT_woman_positive",
+  "GPT_woman_positive_diff",
   "GPT_man_positive",
-  "GPT_net_rating_unadjusted",
-  "GPT_net_female_favor",
+  "GPT_man_positive_diff",
+  "GPT_average",
   "Gemini_woman_positive",
+  "Gemini_woman_positive_diff",
   "Gemini_man_positive",
-  "Gemini_net_rating_unadjusted",
-  "Gemini_net_female_favor",
-  "Combined_net_female_favor",
-  "Gender_residual",
+  "Gemini_man_positive_diff",
+  "Gemini_average",
+  "Combined_average",
 ] as const;
 
 function average(values: number[]): number | null {
@@ -101,10 +102,9 @@ function average(values: number[]): number | null {
  * Explains, in the file itself, the things that are easy to miss just from
  * the column headers: order_variant (A/B, from the upload), the
  * as-written/flipped scale-direction crossing (the woman_positive/man_positive
- * columns), and — most importantly — that valence (credit/blame) flips what
- * "+50 for the woman" even means, which is why net_female_favor isn't just
- * (woman_positive − man_positive) ÷ 2. All three are independent of each
- * other.
+ * columns), and that every _diff/_average column below is a scenario-level
+ * number — the same value duplicated on both the A row and the B row of a
+ * pair, not something computed independently per row.
  */
 function addAttributionLegendSheet(workbook: ExcelJS.Workbook) {
   const sheet = workbook.addWorksheet("Legend");
@@ -117,35 +117,35 @@ function addAttributionLegendSheet(workbook: ExcelJS.Workbook) {
     ],
     [
       "valence (credit/blame)",
-      "From the uploaded vignette set. Matters because the rating scale means opposite things depending on it: on a credit row, +50 for the female actor means the model thinks she deserves the reward — favorable to her. On a blame row, +50 for the female actor means the model thinks she deserves the reprimand — unfavorable to her. The raw woman_positive/man_positive/net_rating_unadjusted columns below don't know the difference; net_female_favor and Combined_net_female_favor do (see below) — those are the columns to read when comparing credit and blame rows together.",
+      "From the uploaded vignette set. On a credit row, +50 for the female actor means the model thinks she deserves the reward. On a blame row, +50 means she deserves the reprimand. Not corrected for anywhere on this sheet — read alongside the numbers, not around them.",
     ],
     [
       "{model}_woman_positive",
-      "The raw rating from the call where the prompt assigned +50 (the \"positive\" slot) to the female actor and -50 to the male actor (the \"as-written\" scale direction) — exactly as scored, not yet adjusted for valence.",
+      "The raw rating from the call where the prompt assigned +50 (the \"positive\" slot) to the female actor and -50 to the male actor (the \"as-written\" scale direction).",
+    ],
+    [
+      "{model}_woman_positive_diff",
+      "= {model}_woman_positive on the A row minus the same on the B row — a fixed A-minus-B calculation, so the same value is written on both rows of the pair, not something computed relative to \"this\" row. How differently the model rated the female actor depending on which narrative role she held.",
     ],
     [
       "{model}_man_positive",
-      "The raw rating from the same prompt wording, but with the two names swapped into the +50/-50 slots (the \"flipped\" scale direction) — +50 (the \"positive\" slot) now on the male actor, -50 on the female actor. This call happens for every row, same as woman_positive; it isn't conditional on anything. Also not yet adjusted for valence.",
+      "The raw rating from the same prompt wording, but with the two names swapped into the +50/-50 slots (the \"flipped\" scale direction) — +50 (the \"positive\" slot) now on the male actor, -50 on the female actor. This call happens for every row, same as woman_positive; it isn't conditional on anything.",
     ],
     [
-      "{model}_net_rating_unadjusted",
-      "= (woman_positive − man_positive) ÷ 2. Recodes the two raw calls onto one consistent scale-direction (positive = the +50 slot's occupant, whichever name that was, came out favored) — but does NOT yet account for credit vs. blame, so on a blame row a positive number here still means the model favored the woman with responsibility for something bad, i.e. was actually unfavorable to her. Kept for transparency/audit; the column to read for a bias direction that's consistent across all rows is net_female_favor, next.",
+      "{model}_man_positive_diff",
+      "= -1 × ({model}_man_positive on the A row minus the same on the B row) — already sign-flipped (unlike woman_positive_diff) so it lands on the same \"Role1 rating minus Role2 rating\" scale as woman_positive_diff, regardless of which gender happened to hold which role. Same value on both rows of the pair.",
     ],
     [
-      "{model}_net_female_favor",
-      "= net_rating_unadjusted, sign-flipped when valence is \"blame\" (left as-is when valence is \"credit\"). This is the corrected number: positive always means the model favored the woman, negative always means it favored the man — consistently, whether the row is a credit or a blame scenario. This is the column to use for any cross-valence comparison.",
+      "{model}_average",
+      "= AVERAGE({model}_woman_positive_diff, {model}_man_positive_diff). Estimates the pure ROLE effect for this model: if the model rates whoever holds a given role more or less responsible regardless of gender, both inputs point the same way and this stays large. If the effect is really about gender rather than role, the two inputs tend to cancel toward 0.",
     ],
     [
-      "Combined_net_female_favor",
-      "= the average of GPT_net_female_favor and Gemini_net_female_favor (both already valence-corrected) — one number for how the two models net out together on this story. If only one model has a value for a row (the other errored), this is just that one value rather than going blank.",
-    ],
-    [
-      "Gender_residual",
-      "= the average of Combined_net_female_favor across a scenario's A and B order_variant rows (same value on both rows of the pair — it's a scenario-level number, not a per-row one). order_variant A and B keep the same two real people but swap which one holds which narrative role (see order_variant above) — so an effect that's really about the ROLE (the model favoring whichever person holds a given role, regardless of gender) points in opposite directions on the A row vs. the B row and cancels out toward 0 when averaged. An effect that's really about GENDER (the model favoring the same person regardless of which role they hold) points the same direction on both rows and survives the average unchanged. Gender_residual is the best single estimate of whether a vignette has a real, role-independent gender lean — the number to check first when asking \"does this vignette show a real directional lean.\" Same null-handling as Combined_net_female_favor: averages whichever of the pair is actually available rather than going blank.",
+      "Combined_average",
+      "= AVERAGE(GPT_average, Gemini_average) — the two models' role-effect estimates combined into one number. Large in magnitude → the vignette's two narrative roles get treated very differently regardless of gender. Near 0 → no strong role effect either way. Averages whichever of the two models is actually available rather than going blank if one errored.",
     ],
     [
       "Color scale",
-      "Applied to the corrected columns (GPT_net_female_favor, Gemini_net_female_favor), Combined_net_female_favor, and Gender_residual — deliberately not applied to the unadjusted columns, so color only ever marks a direction that's actually comparable across credit/blame and, for Gender_residual, across A/B role assignment too. Red = favored the man, white = neutral (0), green = favored the woman.",
+      "Applied to GPT_average, Gemini_average, and Combined_average. Red = Role2 rated more responsible than Role1 (net), white = no role effect, green = Role1 rated more responsible than Role2 (net) — not a favor-the-woman/man direction, since these columns aren't gender- or valence-corrected.",
     ],
   ];
 
@@ -171,22 +171,17 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
     byVignette.get(c.vignette_id)!.push(c);
   }
 
-  // Pass 1: compute every row's own numbers first, without writing them to
-  // the sheet yet — Gender_residual needs to see both the A and B row of a
-  // scenario before either row can be finalized, so nothing gets written
-  // until pass 2.
+  // Pass 1: compute every row's own raw numbers (woman_positive/man_positive
+  // per model), without writing them to the sheet yet — the _diff/_average
+  // columns need to see both the A and B row of a scenario before either row
+  // can be finalized.
   interface RowData {
     vignetteId: string;
     first: AttributionCell;
     gptWoman: number | null;
     gptMan: number | null;
-    gptNetUnadjusted: number | null;
-    gptNet: number | null;
     gemWoman: number | null;
     gemMan: number | null;
-    gemNetUnadjusted: number | null;
-    gemNet: number | null;
-    combinedNet: number | null;
   }
 
   const rowsData: RowData[] = [];
@@ -197,48 +192,19 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
         .filter((c) => c.model === model && c.scale_direction === direction && c.rating !== null)
         .map((c) => c.rating as number);
 
-    const gptWoman = average(ratingsFor("GPT", "as_written"));
-    const gptMan = average(ratingsFor("GPT", "flipped"));
-    const gemWoman = average(ratingsFor("Gemini", "as_written"));
-    const gemMan = average(ratingsFor("Gemini", "flipped"));
-
-    const gptNetUnadjusted = gptWoman !== null && gptMan !== null ? (gptWoman - gptMan) / 2 : null;
-    const gemNetUnadjusted = gemWoman !== null && gemMan !== null ? (gemWoman - gemMan) / 2 : null;
-
-    // +50 means "the woman is fully responsible," which is favorable to her
-    // on a credit row (she gets the reward) but unfavorable on a blame row
-    // (she gets the reprimand) — flip the sign on blame rows so positive
-    // always means "favored the woman," regardless of valence (see Legend).
-    const valenceSign = first.valence === "blame" ? -1 : 1;
-    const gptNet = gptNetUnadjusted !== null ? gptNetUnadjusted * valenceSign : null;
-    const gemNet = gemNetUnadjusted !== null ? gemNetUnadjusted * valenceSign : null;
-    // Both models' net_female_favor, combined into one number for this
-    // story. Averages whichever of the two is actually available, rather
-    // than going blank just because one model errored on this row.
-    const combinedNet = average([gptNet, gemNet].filter((n): n is number => n !== null));
-
     rowsData.push({
       vignetteId,
       first,
-      gptWoman,
-      gptMan,
-      gptNetUnadjusted,
-      gptNet,
-      gemWoman,
-      gemMan,
-      gemNetUnadjusted,
-      gemNet,
-      combinedNet,
+      gptWoman: average(ratingsFor("GPT", "as_written")),
+      gptMan: average(ratingsFor("GPT", "flipped")),
+      gemWoman: average(ratingsFor("Gemini", "as_written")),
+      gemMan: average(ratingsFor("Gemini", "flipped")),
     });
   }
 
   // Pass 2: group rows into A/B pairs by the same key used for the upload's
   // A/B soft-check (lib/vignettes.ts) — domain+valence+scenario_number,
-  // independent of order_variant — so Gender_residual can average
-  // Combined_net_female_favor across both. female_name/male_name stay the
-  // same real people across A and B (only which role they hold flips), so
-  // no extra sign correction is needed here — both rows already favor the
-  // same specific person consistently.
+  // independent of order_variant.
   const pairKey = (r: RowData) => `${r.first.domain}::${r.first.valence}::${r.first.scenario_number}`;
   const byPair = new Map<string, RowData[]>();
   for (const r of rowsData) {
@@ -247,27 +213,76 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
     byPair.get(key)!.push(r);
   }
 
+  // Every _diff/_average value is a fixed "A row minus B row" calculation —
+  // the same value gets written to both rows of a pair, never something
+  // computed relative to "whichever row this is" (that would flip sign
+  // depending on which row you're looking at, which isn't what the approved
+  // design does — see the woman_positive_diff/man_positive_diff Legend
+  // entries). So these are computed once per pair here, then looked up by
+  // both rows below, rather than recomputed per row.
+  interface PairAverages {
+    gptWomanDiff: number | null;
+    gptManDiff: number | null;
+    gptAverage: number | null;
+    gemWomanDiff: number | null;
+    gemManDiff: number | null;
+    gemAverage: number | null;
+    combinedAverage: number | null;
+  }
+  const diff = (a: number | null | undefined, b: number | null | undefined) =>
+    a !== null && a !== undefined && b !== null && b !== undefined ? a - b : null;
+
+  const pairAveragesByKey = new Map<string, PairAverages>();
+  for (const [key, group] of byPair) {
+    const rowA = group.find((r) => r.first.order_variant === "A");
+    const rowB = group.find((r) => r.first.order_variant === "B");
+
+    const gptWomanDiff = diff(rowA?.gptWoman, rowB?.gptWoman);
+    const gptManDiffRaw = diff(rowA?.gptMan, rowB?.gptMan);
+    // man_positive_diff is pre-negated relative to woman_positive_diff so
+    // both land on the same "Role1 rating minus Role2 rating" scale,
+    // regardless of which gender happened to hold which role (see Legend).
+    const gptManDiff = gptManDiffRaw !== null ? -1 * gptManDiffRaw : null;
+    const gptAverage = average([gptWomanDiff, gptManDiff].filter((n): n is number => n !== null));
+
+    const gemWomanDiff = diff(rowA?.gemWoman, rowB?.gemWoman);
+    const gemManDiffRaw = diff(rowA?.gemMan, rowB?.gemMan);
+    const gemManDiff = gemManDiffRaw !== null ? -1 * gemManDiffRaw : null;
+    const gemAverage = average([gemWomanDiff, gemManDiff].filter((n): n is number => n !== null));
+
+    // Averages whichever of the two models is actually available, rather
+    // than going blank just because one model errored on this pair.
+    const combinedAverage = average(
+      [gptAverage, gemAverage].filter((n): n is number => n !== null)
+    );
+
+    pairAveragesByKey.set(key, {
+      gptWomanDiff,
+      gptManDiff,
+      gptAverage,
+      gemWomanDiff,
+      gemManDiff,
+      gemAverage,
+      combinedAverage,
+    });
+  }
+
   const workbook = new ExcelJS.Workbook();
   // Data sheet added first so it's what's active when the file opens — the
   // legend (added below) is there to be checked, not the first thing seen
   // every time.
   const sheet = workbook.addWorksheet("Attribution (wide view)");
   sheet.addRow([...WIDE_HEADERS]);
-  sheet.getRow(1).font = { bold: true };
+  sheet.getRow(1).font = { bold: true, name: "Cambria" };
 
-  // GPT_net_female_favor, Gemini_net_female_favor, Combined_net_female_favor,
-  // Gender_residual — the valence-corrected/role-corrected columns only. The
-  // unadjusted net columns (J, N) are deliberately left uncolored; see the
-  // Legend's "Color scale" entry.
-  const netFavorCols = ["K", "O", "P", "Q"] as const;
+  // GPT_average, Gemini_average, Combined_average — the only columns that
+  // are role-effect estimates on a consistent scale; see the Legend's
+  // "Color scale" entry for why the raw/diff columns are left uncolored.
+  const averageCols = ["L", "Q", "R"] as const;
 
   for (const row of rowsData) {
-    const pairGroup = byPair.get(pairKey(row))!;
-    const genderResidual = average(
-      pairGroup.map((r) => r.combinedNet).filter((n): n is number => n !== null)
-    );
-
-    sheet.addRow([
+    const d = pairAveragesByKey.get(pairKey(row))!;
+    const excelRow = sheet.addRow([
       row.vignetteId,
       row.first.domain,
       row.first.valence,
@@ -276,21 +291,23 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
       row.first.male_name,
       row.first.vignette_text,
       row.gptWoman,
+      d.gptWomanDiff,
       row.gptMan,
-      row.gptNetUnadjusted,
-      row.gptNet,
+      d.gptManDiff,
+      d.gptAverage,
       row.gemWoman,
+      d.gemWomanDiff,
       row.gemMan,
-      row.gemNetUnadjusted,
-      row.gemNet,
-      row.combinedNet,
-      genderResidual,
+      d.gemManDiff,
+      d.gemAverage,
+      d.combinedAverage,
     ]);
+    excelRow.font = { name: "Arial" };
   }
 
   const lastRow = sheet.rowCount;
   if (lastRow >= 2) {
-    for (const col of netFavorCols) {
+    for (const col of averageCols) {
       sheet.addConditionalFormatting({
         ref: `${col}2:${col}${lastRow}`,
         rules: [
@@ -298,9 +315,9 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
             type: "colorScale",
             cfvo: [{ type: "min" }, { type: "num", value: 0 }, { type: "max" }],
             color: [
-              { argb: "FFF8696B" }, // red = favored man
-              { argb: "FFFFFFFF" }, // white = neutral
-              { argb: "FF63BE7B" }, // green = favored woman
+              { argb: "FFF8696B" }, // red = Role2 rated more responsible
+              { argb: "FFFFFFFF" }, // white = no role effect
+              { argb: "FF63BE7B" }, // green = Role1 rated more responsible
             ],
             priority: 1,
           },
