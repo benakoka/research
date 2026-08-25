@@ -180,3 +180,10 @@ from the other columns — don't type it by hand.
   keeps each serverless invocation short while still supporting 100+ call
   runs, live progress, and re-running a single failed cell/generation
   without restarting the batch — all without a server-side store.
+- Both modules have a Cancel button while a run is in progress. It stops the
+  batch loop between batches and aborts whatever batch request is actually
+  in flight (via `AbortController`), so it doesn't wait out a slow/retrying
+  batch — cells/generations that hadn't been sent yet stay `pending`, the
+  run is marked `cancelled`, and it's still fully exportable as-is. A
+  cancelled run does not auto-resume on page reload (unlike an
+  interrupted-but-not-cancelled one); starting a new run replaces it.

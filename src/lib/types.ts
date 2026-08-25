@@ -120,7 +120,12 @@ export interface AttributionRun {
   // Persisted client-side (localStorage) only; nothing here ever reaches a
   // database, so "download the output" is the only durable copy.
   cells: AttributionCell[];
-  status: "pending" | "running" | "done";
+  // "cancelled": the user stopped the run mid-flight (Cancel button). Cells
+  // that hadn't been sent yet stay "pending" — cancelling doesn't discard
+  // anything already completed, and the run can still be exported as-is.
+  // Distinct from "pending"/"running" specifically so a page refresh doesn't
+  // auto-resume a run the user deliberately stopped.
+  status: "pending" | "running" | "done" | "cancelled";
 }
 
 // ---------------------------------------------------------------------------
@@ -174,5 +179,6 @@ export interface RewritingRun {
   vignetteSetFilename: string;
   // Inline, same reasoning as AttributionRun.cells above.
   chains: RewritingChain[];
-  status: "pending" | "running" | "done";
+  // See AttributionRun.status — same "cancelled" meaning here.
+  status: "pending" | "running" | "done" | "cancelled";
 }

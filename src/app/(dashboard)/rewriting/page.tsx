@@ -52,6 +52,14 @@ export default function RewritingPage() {
   // exports (or dismisses it deliberately), not just flash by.
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const runningRef = useRef(false);
+  // Checked at the top of every driveRun loop iteration (between batches) so
+  // Cancel takes effect even if a batch happens to already be in flight when
+  // it's clicked. abortControllerRef additionally kills whatever batch
+  // request is actually in flight right now, so Cancel doesn't have to wait
+  // out a slow/retrying batch (up to ~a minute with the model-call retry
+  // policy) before doing anything.
+  const cancelRequestedRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   function persist(updated: RewritingRun) {
     setRun(updated);
@@ -63,11 +71,17 @@ export default function RewritingPage() {
     }
   }
 
-  async function processBatch(chains: RewritingChain[], promptTemplate: string, retryThresholdFraction: number) {
+  async function processBatch(
+    chains: RewritingChain[],
+    promptTemplate: string,
+    retryThresholdFraction: number,
+    signal?: AbortSignal
+  ) {
     const res = await fetch("/api/rewriting/process", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chains, promptTemplate, retryThresholdFraction }),
+      signal,
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error ?? "Batch failed.");
@@ -79,12 +93,32 @@ export default function RewritingPage() {
     runningRef.current = true;
     setProcessing(true);
     setError(null);
+    cancelRequestedRef.current = false;
     try {
       let working = current;
       while (true) {
+        if (cancelRequestedRef.current) {
+          persist({ ...working, status: "cancelled" });
+          return;
+        }
         const runnable = working.chains.filter((c) => nextRunnableGenerationIndex(c) !== null).slice(0, BATCH_SIZE);
         if (runnable.length === 0) break;
-        const results = await processBatch(runnable, working.promptTemplate, working.retryThresholdFraction);
+
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        let results: RewritingChain[];
+        try {
+          results = await processBatch(runnable, working.promptTemplate, working.retryThresholdFraction, controller.signal);
+        } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") {
+            persist({ ...working, status: "cancelled" });
+            return;
+          }
+          throw err;
+        } finally {
+          abortControllerRef.current = null;
+        }
+
         const byId = new Map(results.map((c) => [c.id, c]));
         const chains = working.chains.map((c) => byId.get(c.id) ?? c);
         working = { ...working, status: "running", chains };
@@ -100,11 +134,24 @@ export default function RewritingPage() {
     }
   }
 
+  function cancelRun() {
+    if (
+      !confirm(
+        "Cancel this run? Whatever's already completed stays — you can export it — but nothing still pending will be sent."
+      )
+    )
+      return;
+    cancelRequestedRef.current = true;
+    abortControllerRef.current?.abort();
+  }
+
   useEffect(() => {
     (async () => {
       const stored = getRewritingRun();
       setRun(stored);
-      if (stored) {
+      // Resume automatically if the page was refreshed mid-run — but not a
+      // run the user deliberately cancelled.
+      if (stored && stored.status !== "cancelled") {
         // Any generation left "running" from a torn-down tab needs to go
         // back to pending before we can pick it up again.
         const chains = stored.chains.map((c) => ({
@@ -289,7 +336,20 @@ export default function RewritingPage() {
             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
               <div className="h-full bg-slate-900 transition-all" style={{ width: `${pct}%` }} />
             </div>
-            {processing && <p className="mt-1 text-xs text-slate-500">Processing batches…</p>}
+            {processing && (
+              <div className="mt-1 flex items-center gap-2">
+                <p className="text-xs text-slate-500">Processing batches…</p>
+                <button onClick={cancelRun} className="text-xs font-medium text-red-600 underline hover:text-red-800">
+                  Cancel
+                </button>
+              </div>
+            )}
+            {run.status === "cancelled" && (
+              <p className="mt-1 text-xs text-amber-700">
+                ⚠ Cancelled — {progress.pending} generation{progress.pending === 1 ? "" : "s"} never got sent.
+                Export what you have below, or start a new run (this one will be replaced, not continued).
+              </p>
+            )}
 
             <div className="mt-4 flex gap-3">
               <button
