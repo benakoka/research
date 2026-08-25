@@ -11,17 +11,18 @@ import { RewritingChain } from "@/lib/types";
 // chains have a runnable next generation and hand back the results.
 const MAX_BATCH_SIZE = 10;
 
-// A batch of concurrent generations (Promise.all below) each independently
-// retry on transient errors (see lib/models/index.ts) — with several
-// generations hitting that at once, this route's total time can exceed
-// Vercel's short platform default with no explicit config, which silently
-// kills the request rather than returning an error (the run just looks
-// hung). 60s is the max Vercel allows without a paid-plan-specific config,
-// and gives real headroom over the realistic worst case per generation
-// after the retry-budget fix (single-digit seconds — see
-// lib/models/index.ts's MAX_ATTEMPTS comment).
-export const maxDuration = 60;
-
+// NOT setting an explicit `maxDuration` here on purpose — a prior attempt at
+// this (`export const maxDuration = 60`) caused every request to this route
+// to crash immediately at the platform level (Vercel's generic error page,
+// not one of our own error responses — withApiErrorHandling below can't even
+// catch it, since the failure isn't inside the handler). Most likely cause:
+// an account not on Vercel's newer Fluid Compute pricing has a much lower,
+// non-configurable hard cap (historically 10s on legacy Hobby), and an
+// explicit maxDuration exceeding that gets rejected outright rather than
+// clamped. If you confirm (Vercel dashboard → the deployment's Runtime Logs)
+// that your account supports a higher duration, re-adding this is safe and
+// worth doing — see lib/models/index.ts's MAX_ATTEMPTS comment for why a
+// slow/overloaded batch might need more room than the platform default.
 interface ProcessBody {
   chains: RewritingChain[];
   promptTemplate: string;
