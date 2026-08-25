@@ -13,14 +13,24 @@ export async function callGemini(
 
   let res: Response;
   try {
-    res = await fetchWithTimeout(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // No generationConfig.temperature override — leave at the provider's default (§2).
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
-    });
+    res = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // No generationConfig.temperature override — leave at the provider's default (§2).
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+        }),
+      },
+      // Longer than the shared default (30s) specifically for Gemini: under
+      // real demand it can genuinely take longer than that to respond at
+      // all (not erroring, just slow) — retrying a call that consistently
+      // needs more time than the timeout doesn't help, it just repeats the
+      // same cutoff. GPT/Anthropic haven't shown this, so left at the
+      // shared default rather than bumped speculatively.
+      45_000
+    );
   } catch (err) {
     // Timeouts are retryable (§5) — a hung request shouldn't block the rest
     // of the batch's Promise.all forever, but it also isn't a permanent failure.
