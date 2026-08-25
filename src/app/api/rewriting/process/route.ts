@@ -6,10 +6,15 @@ import { RewritingChain } from "@/lib/types";
 
 // Modest concurrency per batch across chains (chains are independent; within
 // a chain, generations must run in order) — the client drives batching
-// itself (see (dashboard)/rewriting/page.tsx). Stateless transform: given
-// some chains + the prompt template/retry threshold, advance whichever
-// chains have a runnable next generation and hand back the results.
-const MAX_BATCH_SIZE = 10;
+// itself (see (dashboard)/rewriting/page.tsx, whose own BATCH_SIZE is the
+// one that actually governs normal traffic — this is just a safety ceiling
+// in case a client ever sends more). Stateless transform: given some chains
+// + the prompt template/retry threshold, advance whichever chains have a
+// runnable next generation and hand back the results. Promise.all waits for
+// the slowest generation in the batch, so fewer concurrent ones means less
+// chance one slow provider response (e.g. Gemini under real demand) holds
+// up the rest.
+const MAX_BATCH_SIZE = 6;
 
 // NOT setting an explicit `maxDuration` here on purpose — a prior attempt at
 // this (`export const maxDuration = 60`) caused every request to this route

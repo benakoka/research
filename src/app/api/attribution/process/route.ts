@@ -5,12 +5,14 @@ import { AttributionCell } from "@/lib/types";
 
 // Modest concurrency per batch to avoid hammering provider rate limits (§5).
 // The client owns the run state and drives batching itself (see
-// (dashboard)/attribution/page.tsx) — this route is a stateless transform:
-// given some pending cells + the prompt template, call the models and hand
-// back results. Nothing is persisted server-side, so this cap also protects
-// against a single request running long enough to hit the serverless
-// function's time limit.
-const MAX_BATCH_SIZE = 10;
+// (dashboard)/attribution/page.tsx, whose own BATCH_SIZE is the one that
+// actually governs normal traffic — this is just a safety ceiling in case
+// a client ever sends more). Nothing is persisted server-side, so this cap
+// also protects against a single request running long enough to hit the
+// serverless function's time limit — Promise.all waits for the slowest
+// cell in the batch, so fewer concurrent cells means less chance one slow
+// provider response (e.g. Gemini under real demand) holds up the rest.
+const MAX_BATCH_SIZE = 6;
 
 // NOT setting an explicit `maxDuration` here on purpose — a prior attempt at
 // this (`export const maxDuration = 60`) caused every request to this route
