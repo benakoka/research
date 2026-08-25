@@ -8,16 +8,31 @@ import { isTestMode } from "@/lib/apiKeys";
 export { ModelCallError };
 export type { ModelCallResult };
 
-// 6 attempts instead of 3 — a "model overloaded" 503 (Gemini's specific
-// wording for its own capacity, not a rate-limit or an outage) is exactly
-// the kind of transient error that clears up if you wait a bit longer, and
-// 3 short attempts (~3s total) wasn't giving it enough runway.
-const MAX_ATTEMPTS = 6;
+// Deliberately modest — 4 attempts, capped backoff. executeAttributionCell
+// and executeGeneration each wrap callModel in their *own* up-to-10-attempt
+// retry loop (missing number / missing word-count target) — but that outer
+// loop only iterates again on a *successful* response that didn't qualify
+// (e.g. no number in it); if callModel itself throws (exhausts its retries
+// on a genuinely failing/overloaded call), the outer loop's try/catch
+// short-circuits immediately rather than trying again. So the two budgets
+// don't multiply together the way they might look like they do — verified
+// empirically: a cell hitting sustained 503s the whole time makes exactly
+// MAX_ATTEMPTS calls and fails in ~5s, not 10x that.
+//
+// The real risk with a larger budget (6 attempts, 20s ceiling, an earlier
+// version of this fix) was simpler: several *concurrent* cells in the same
+// batch each taking up to ~35-40s worst case, on a route that never set an
+// explicit maxDuration — Vercel's short default killed the request before
+// it could respond, which looked like the run silently hanging with no
+// error. 4 attempts / an 8s ceiling keeps one call's worst realistic case
+// (fast 503s, not full timeouts) to single-digit seconds, comfortably inside
+// the process routes' now-explicit maxDuration regardless of how many
+// concurrent cells in a batch hit it at once.
+const MAX_ATTEMPTS = 4;
 const BASE_BACKOFF_MS = 1000;
-// Caps how long any single wait gets, so 6 attempts of raw exponential
-// growth (1s,2s,4s,8s,16s,32s) doesn't run away — full jitter still applies
-// on top of this.
-const MAX_BACKOFF_MS = 20_000;
+// Caps how long any single wait gets — full jitter still applies on top of
+// this (see backoffDelayMs).
+const MAX_BACKOFF_MS = 8_000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));

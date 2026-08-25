@@ -12,6 +12,16 @@ import { AttributionCell } from "@/lib/types";
 // function's time limit.
 const MAX_BATCH_SIZE = 10;
 
+// A batch of concurrent cells (Promise.all below) each independently retry
+// on transient errors (see lib/models/index.ts) — with several cells hitting
+// that at once, this route's total time can exceed Vercel's short platform
+// default with no explicit config, which silently kills the request rather
+// than returning an error (the run just looks hung). 60s is the max Vercel
+// allows without a paid-plan-specific config, and gives real headroom over
+// the realistic worst case per cell after the retry-budget fix (single-digit
+// seconds per cell — see lib/models/index.ts's MAX_ATTEMPTS comment).
+export const maxDuration = 60;
+
 interface ProcessBody {
   cells: AttributionCell[];
   promptTemplate: string;

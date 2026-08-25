@@ -1,8 +1,11 @@
 // Shared by all three providers (openai/gemini/anthropic) so a hung request
 // can't block an entire batch forever. `Promise.all` in the /process routes
 // waits on every call in the batch — without a timeout, one stalled provider
-// request would stall up to 10 cells/generations indefinitely.
-const DEFAULT_TIMEOUT_MS = 60_000;
+// request would stall up to 10 cells/generations indefinitely. Kept well
+// under the process routes' maxDuration despite callModel retrying failed
+// calls up to 4x — a single attempt hanging for the old 60s default could
+// alone burn through most of that budget.
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
  * Like `fetch`, but aborts after `timeoutMs` and throws a plain Error with a
