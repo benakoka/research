@@ -23,7 +23,7 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
   }
 
   if (body.format === "wide") {
-    const workbook = buildAttributionWideWorkbook(body.cells);
+    const workbook = await buildAttributionWideWorkbook(body.cells);
     const buffer = await workbook.xlsx.writeBuffer();
     return new NextResponse(buffer as ArrayBuffer, {
       headers: {

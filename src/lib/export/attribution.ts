@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import path from "node:path";
 import { AttributionCell } from "@/lib/types";
 import { toCsv } from "@/lib/csv";
 
@@ -72,88 +73,64 @@ export function buildAttributionLongCsv(cells: AttributionCell[]): string {
   return toCsv([...LONG_HEADERS], rows);
 }
 
-// One row per vignette_id (order_variant A and B are separate rows), plus a
-// GPT_/Gem_/Combined_ column family — matches the layout the user supplied
-// in Revised_Sheet_Format.xlsx ("Attribution Summarized Data" tab), with
-// "Actor A" resolved to the female-named actor and "Actor B" to the male-
-// named actor (confirmed 2026-08-28 — this is what turns ActorA_Pref into a
-// signed gender-favor estimate rather than an arbitrary order label).
-const WIDE_HEADERS = [
-  "vignette_id",
-  "domain",
-  "valence",
-  "order_variant",
-  "female_name",
-  "male_name",
-  "vignette_text",
-  "GPT_ARating",
-  "GPT_A_1stAction_Pref",
-  "GPT_A_ActorA_Pref",
-  "GPT_B_Rating",
-  "GPT_B_1stAction_Pref",
-  "GPT_B_ActorA_Pref",
-  "GPTMean_1stAction_Pref",
-  "GPTMean_ActorA_Pref",
-  "GPT_Prompt_Diff",
-  "Gem_ARating",
-  "Gem_A_1stAction_Pref",
-  "Gem_A_ActorA_Pref",
-  "Gem_B_Rating",
-  "Gem_B_1stAction_Pref",
-  "Gem_B_Actor_APref",
-  "Gem_1stAction_Pref",
-  "Gem_ActorA_Pref",
-  "Gem_Prompt_Diff",
-  "Combined_mean_1stAction_Pref",
-  "Combined_mean_ActorA_Pref",
+// The wide export is built by cloning the user-supplied reference workbook
+// (Revised_Sheet_Format.xlsx, "Attribution Summarized Data" / "Legend" /
+// "Graphs by Model" / "Combined Graphs") rather than reconstructing its
+// formatting from scratch — an earlier from-scratch attempt at this quietly
+// diverged from the reference on borders, the Column Mean row's fill, the
+// GPT_ARating column's bold data cells, and the exact (overlapping) column
+// ranges its conditional-formatting rules cover. Cloning every style object
+// directly off the real file makes "identical formatting" a copy, not
+// something re-derived and hoped to match. The template lives in public/ so
+// it's guaranteed to ship in the serverless deployment; it was re-saved
+// through openpyxl once before being checked in, to flatten Excel's "shared
+// formula" optimization, which otherwise makes ExcelJS throw when the
+// sample rows are spliced out — the flattened file evaluates to the exact
+// same values, just without that internal optimization — and its embedded
+// charts were dropped (unused — see the Graphs sheets' handling below).
+const TEMPLATE_PATH = path.join(
+  process.cwd(),
+  "public",
+  "export-templates",
+  "attribution_wide_template.xlsx"
+);
+
+const DATA_SHEET_NAME = "Attribution Summarized Data";
+const ALL_COLS = [
+  "A", "B", "C", "D", "E", "F", "G",
+  "H", "I", "J", "K", "L", "M", "N", "O", "P",
+  "Q", "R", "S", "T", "U", "V", "W", "X", "Y",
+  "Z", "AA",
 ] as const;
+// Every column from GPT_ARating onward is numeric — everything before it
+// (vignette_id..vignette_text) is a plain pass-through value.
+const NUMERIC_COLS = new Set(ALL_COLS.slice(7));
 
-// Column widths, in the same order as WIDE_HEADERS — copied from the user's
-// reference file rather than guessed.
-const WIDE_COLUMN_WIDTHS = [
-  31, 15.86, 15.43, 14.29, 15.29, 13, 22.71, 8.86, 13.71, 17.14, 10.14, 13, 18.14, 16, 19.57, 13.86, 9.29, 14.29, 17,
-  9.86, 13.14, 15.43, 17.14, 14.86, 16.29, 18.57, 18.14,
+// The reference file's own sample data occupies rows 3-38, with the "Column
+// Mean:" row at 39 — used both to know where to read template styles from
+// and where the real data should start once the sample rows are removed.
+const TEMPLATE_FIRST_DATA_ROW = 3;
+const TEMPLATE_MEAN_ROW = 39;
+
+// The reference file's 3 conditional-formatting rules cover overlapping,
+// slightly asymmetric column groups (e.g. GPT_B_ActorA_Pref is colored but
+// its GPT_A_ActorA_Pref counterpart isn't) — copied exactly as column-letter
+// groups here, row-independent, so the *shape* of the reference file's
+// formatting is preserved byte-for-byte rather than "cleaned up" into a
+// tidier set of columns.
+const CF_RULE_COLUMN_GROUPS: string[][] = [
+  ["M:P", "V:V", "X:Y"],
+  ["V:W"],
+  ["X:AA"],
 ];
 
-// Header-row-2 fill color per column (null = plain pass-through column, no
-// fill). Blue = GPT raw ratings, lighter blue = GPT derived diff/sum
-// columns, black = GPT/Gemini "Mean"/"Prompt_Diff" columns, orange/light
-// orange = the Gemini equivalents, purple = Combined — copied from the
-// reference file's own color coding.
-const WIDE_HEADER_FILLS: (string | null)[] = [
-  null,
-  null,
-  null,
-  null,
-  null,
-  null,
-  null, // vignette_id..vignette_text
-  "FF0000FF",
-  "FF4A86E8",
-  "FF4A86E8", // GPT_ARating, GPT_A_1stAction_Pref, GPT_A_ActorA_Pref
-  "FF0000FF",
-  "FF4A86E8",
-  "FF4A86E8", // GPT_B_Rating, GPT_B_1stAction_Pref, GPT_B_ActorA_Pref
-  "FF000000",
-  "FF000000",
-  "FF000000", // GPTMean_1stAction_Pref, GPTMean_ActorA_Pref, GPT_Prompt_Diff
-  "FFB45F06",
-  "FFF6B26B",
-  "FFF6B26B", // Gem_ARating, Gem_A_1stAction_Pref, Gem_A_ActorA_Pref
-  "FFB45F06",
-  "FFF6B26B",
-  "FFF6B26B", // Gem_B_Rating, Gem_B_1stAction_Pref, Gem_B_Actor_APref
-  "FF000000",
-  "FF000000",
-  "FF000000", // Gem_1stAction_Pref, Gem_ActorA_Pref, Gem_Prompt_Diff
-  "FF9900FF",
-  "FF9900FF", // Combined_mean_1stAction_Pref, Combined_mean_ActorA_Pref
-];
-
-// The "final estimate" columns — everything else (raw ratings, and the
-// intermediate diff/sum columns that only exist to be combined into these)
-// is left uncolored, same distinction the reference file draws.
-const WIDE_COLOR_SCALE_COLS = ["N", "O", "P", "W", "X", "Y", "Z", "AA"] as const;
+function cloneStyle(style: Partial<ExcelJS.Style>): Partial<ExcelJS.Style> {
+  // ExcelJS style objects are plain data (font/fill/border/alignment/
+  // numFmt) but nested — a shallow spread would leave every cloned cell
+  // sharing the same inner font/fill/border objects, so mutating one
+  // (ExcelJS does, internally, on assignment) could bleed into the others.
+  return JSON.parse(JSON.stringify(style));
+}
 
 function average(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -169,101 +146,12 @@ function sum(a: number | null | undefined, b: number | null | undefined): number
 }
 
 /**
- * Explains, in the file itself, the things that are easy to miss just from
- * the column headers: order_variant (A/B), the Actor A/B ↔ female/male
- * mapping, the raw-rating vs. derived-estimate columns, and that every
- * _1stAction_Pref/_ActorA_Pref/Mean/Combined value is a pair-level number —
- * the same value duplicated on both the A row and the B row of a scenario,
- * not something computed independently per row (the *_Prompt_Diff and raw
- * *_Rating columns are the only per-row exceptions).
- */
-function addAttributionLegendSheet(workbook: ExcelJS.Workbook) {
-  const sheet = workbook.addWorksheet("Legend");
-  sheet.columns = [{ width: 26 }, { width: 100 }];
-
-  const rows: [string, string][] = [
-    [
-      "order_variant (A/B) / valence (credit/blame)",
-      "Both from the uploaded vignette set, not generated by this run. order_variant: A = the story as originally written; B = the mirrored replicate — introduction order and action assignment both swapped (a separate, independently-written vignette_text, not a string substitution of A). valence: on a credit row, +50 for Actor A means the model thinks Actor A deserves the reward; on a blame row, +50 means Actor A deserves the reprimand — not corrected for on the raw *_Rating columns, only on the Mean/Combined columns below (see those rows).",
-    ],
-    [
-      "Actor A / Actor B",
-      "Actor A = the female-named actor (the name in the female_name column). Actor B = the male-named actor (male_name column). Fixed for both rows of a pair, regardless of order_variant — so \"favors Actor A\" always means \"favors the female actor,\" never a role/order label.",
-    ],
-    [
-      "GPT_ARating / Gem_ARating",
-      "The raw rating (averaged across reps, if rep count > 1) from the call where the prompt assigned +50 (the \"positive\" slot) to Actor A and -50 to Actor B. Positive = the model favored Actor A (the female actor) on this specific call.",
-    ],
-    [
-      "GPT_A_1stAction_Pref / Gem_A_1stAction_Pref",
-      "= (ARating on this pair's A-row) − (ARating on its B-row). Same value written on both rows of the pair. Measures how much this one scale-direction call's rating shifts purely from which order variant (narrative role) is being read — the order/role sensitivity of the ARating call on its own, not yet corrected for the scale-slot artifact.",
-    ],
-    [
-      "GPT_A_ActorA_Pref / Gem_A_ActorA_Pref",
-      "= (ARating on the A-row) + (ARating on the B-row). An intermediate sum (not yet an average) of how much the ARating call favored Actor A across both narrative roles she can hold. Still on the \"favor Actor A\" scale, at double the per-call magnitude — combined with the B-slot term below to produce the corrected ActorA_Pref estimate.",
-    ],
-    [
-      "GPT_B_Rating / Gem_B_Rating",
-      "The raw rating (averaged across reps) from the same prompt wording with the two actors swapped into the +50/-50 slots — +50 now on Actor B, -50 on Actor A. Positive = the model favored Actor B (the male actor) on this call.",
-    ],
-    [
-      "GPT_B_1stAction_Pref / Gem_B_1stAction_Pref",
-      "= −1 × [(B_Rating on the A-row) − (B_Rating on the B-row)]. Already sign-flipped so it lands on the same \"Role1 minus Role2\" direction as A_1stAction_Pref, regardless of which actor happens to hold which role. Same value on both rows of the pair.",
-    ],
-    [
-      "GPT_B_ActorA_Pref / Gem_B_Actor_APref",
-      "= (B_Rating on the A-row) + (B_Rating on the B-row). Despite the column name, this is an intermediate sum on the \"favor Actor B\" scale — not sign-flipped at this stage. Positive values mean Actor B (the male actor) was favored by the B-slot call; it's converted onto the \"favor Actor A\" direction inside the *_ActorA_Pref formula below, where it's subtracted rather than added.",
-    ],
-    [
-      "GPTMean_1stAction_Pref / Gem_1stAction_Pref",
-      "= IF(valence=\"blame\", −1, 1) × AVERAGE(A_1stAction_Pref, B_1stAction_Pref). The model's estimate of the pure ROLE effect: does whichever actor holds a given narrative role get rated more responsible, regardless of which specific actor holds it — sign-corrected so it's consistent across credit and blame rows. If the effect is really about actor identity (gender) rather than role, the two inputs tend to cancel toward 0.",
-    ],
-    [
-      "GPTMean_ActorA_Pref / Gem_ActorA_Pref",
-      "= IF(valence=\"blame\", −1, 1) × (A_ActorA_Pref − B_ActorA_Pref) / 4. The model's estimate of the pure GENDER (actor-identity) preference: is the female actor specifically favored, averaged across both narrative roles she appears in and both scale-direction calls, independent of role/order. Positive = female actor favored overall; negative = male actor favored overall. The subtraction corrects for B_ActorA_Pref being on the opposite (\"favor male\") scale; the /4 divides by the four independent measurements being averaged (2 order variants × 2 scale-direction calls).",
-    ],
-    [
-      "GPT_Prompt_Diff / Gem_Prompt_Diff",
-      "= B_Rating + ARating, for this row only (not pair-shared, not averaged across order variants). A same-text scale-consistency check: if the model's judgment is stable and driven by story content, the ARating call and the B_Rating call should land on close-to-opposite sides of zero, making this close to zero. A large nonzero value flags that both calls landed on the same side regardless of which actor held the positive scale slot — evidence the raw rating may be tracking the scale slot itself rather than giving a stable read of the story.",
-    ],
-    [
-      "Combined_mean_1stAction_Pref",
-      "= AVERAGE(GPTMean_1stAction_Pref, Gem_1stAction_Pref) — the two models' role-effect estimates combined into one number. Averages whichever of the two models is actually available rather than going blank if one errored.",
-    ],
-    [
-      "Combined_mean_ActorA_Pref",
-      "= AVERAGE(GPTMean_ActorA_Pref, Gem_ActorA_Pref) — the two models' gender (actor-identity) preference estimates combined into one number. Same missing-model handling as above.",
-    ],
-    [
-      "Color scale",
-      "Applied to GPTMean_1stAction_Pref, GPTMean_ActorA_Pref, GPT_Prompt_Diff, and their Gemini/Combined equivalents (columns N, O, P, W, X, Y, Z, AA) — the \"final estimate\" columns, not the raw ratings or the intermediate diff/sum columns that only exist to be combined into these. Red = favors Actor B (male), white = no effect, green = favors Actor A (female).",
-    ],
-    [
-      "Bottom row (\"Column Mean:\")",
-      "A summary row averaging each numeric column across every data row in this export (=AVERAGE(range)) — recalculated fresh each time, not carried over from a previous run.",
-    ],
-    [
-      "\"Graphs by Model\" / \"Combined Graphs\" tabs",
-      "Data tables only (one row per scenario, pulling the pair-level Mean/Combined columns from this sheet) — not rendered as charts here, since our export library can't write native Excel chart objects. Select a table's range in Excel and Insert → Chart to get the same bar chart the reference file shipped with.",
-    ],
-  ];
-
-  sheet.addRow(["Column", "What it means"]);
-  sheet.getRow(1).font = { bold: true };
-  for (const row of rows) sheet.addRow(row);
-  sheet.eachRow((row) => {
-    row.alignment = { wrapText: true, vertical: "top" };
-  });
-  sheet.getColumn(1).font = { bold: true };
-}
-
-/**
  * Pair-level derived values — every one of these is a fixed "A row minus
  * (or plus) B row" calculation, so the same value is written to both rows
  * of a pair, never something computed relative to "whichever row this is"
  * (see the Legend sheet). Computed once per pair, then looked up by both
- * rows and by the two graph-feeder sheets below, rather than recomputed
- * each place it's used.
+ * rows and by the two graph-feeder sheets, rather than recomputed each
+ * place it's used.
  */
 interface PairDerived {
   gptA1st: number | null; // GPT_A_1stAction_Pref
@@ -282,30 +170,21 @@ interface PairDerived {
   combinedMeanActorA: number | null; // Combined_mean_ActorA_Pref
 }
 
-/**
- * Wide-format workbook, one row per vignette_id (A and B order variants are
- * separate rows), matching the layout in Revised_Sheet_Format.xlsx
- * ("Attribution Summarized Data"). If rep count > 1, each raw rating is
- * averaged across reps rather than silently dropping data (§3) — repCount
- * > 1 is flagged separately in the run UI.
- */
-export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.Workbook {
+interface RowData {
+  vignetteId: string;
+  first: AttributionCell;
+  gptA: number | null; // GPT_ARating: +50 on the female actor
+  gptB: number | null; // GPT_B_Rating: +50 on the male actor
+  gemA: number | null;
+  gemB: number | null;
+}
+
+/** Shared by the main data sheet and the two graph-feeder sheets. */
+function computeRowsAndPairs(cells: AttributionCell[]) {
   const byVignette = new Map<string, AttributionCell[]>();
   for (const c of cells) {
     if (!byVignette.has(c.vignette_id)) byVignette.set(c.vignette_id, []);
     byVignette.get(c.vignette_id)!.push(c);
-  }
-
-  // Pass 1: compute every row's own raw ARating/BRating (per model), without
-  // writing them to the sheet yet — the pair-level columns need to see both
-  // the A and B row of a scenario before either row can be finalized.
-  interface RowData {
-    vignetteId: string;
-    first: AttributionCell;
-    gptA: number | null; // GPT_ARating: +50 on the female actor
-    gptB: number | null; // GPT_B_Rating: +50 on the male actor
-    gemA: number | null;
-    gemB: number | null;
   }
 
   const rowsData: RowData[] = [];
@@ -326,8 +205,8 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
     });
   }
 
-  // Pass 2: group rows into A/B pairs by the same key used for the upload's
-  // A/B soft-check (lib/vignettes.ts) — domain+valence+scenario_number,
+  // Group rows into A/B pairs by the same key used for the upload's A/B
+  // soft-check (lib/vignettes.ts) — domain+valence+scenario_number,
   // independent of order_variant.
   const pairKey = (r: RowData) => `${r.first.domain}::${r.first.valence}::${r.first.scenario_number}`;
   const byPair = new Map<string, RowData[]>();
@@ -394,164 +273,178 @@ export function buildAttributionWideWorkbook(cells: AttributionCell[]): ExcelJS.
     });
   }
 
+  return { rowsData, pairKey, pairDerivedByKey };
+}
+
+async function loadTemplateWorkbook(): Promise<ExcelJS.Workbook> {
   const workbook = new ExcelJS.Workbook();
-  // Data sheet added first so it's what's active when the file opens — the
-  // legend and graph tabs (added below) are there to be checked, not the
-  // first thing seen every time.
-  const sheet = workbook.addWorksheet("Attribution Summarized Data");
-
-  // Row 1: merged group headers over the GPT/Gemini/Combined column blocks.
-  sheet.getCell("H1").value = "CHAT GPT";
-  sheet.mergeCells("H1:O1");
-  sheet.getCell("Q1").value = "GEMINI";
-  sheet.mergeCells("Q1:X1");
-  sheet.getCell("Z1").value = "COMBINED";
-  sheet.mergeCells("Z1:AA1");
-  for (const [coord, color] of [
-    ["H1", "FF1155CC"],
-    ["Q1", "FFB45F06"],
-    ["Z1", "FF674EA7"],
-  ] as const) {
-    sheet.getCell(coord).font = { bold: true, name: "Arial", color: { argb: color } };
-  }
-  sheet.getRow(1).height = 15;
-
-  // Row 2: the actual column headers, colored per-column to match the
-  // group they belong to (see WIDE_HEADER_FILLS).
-  const headerRow = sheet.addRow([...WIDE_HEADERS]);
-  headerRow.height = 26.25;
-  headerRow.eachCell((cell, colNumber) => {
-    const fill = WIDE_HEADER_FILLS[colNumber - 1];
-    cell.font = { bold: true, name: "Arial", color: { argb: fill ? "FFFFFFFF" : "FF000000" } };
-    if (fill) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
-    cell.alignment = { wrapText: true, vertical: "bottom" };
-  });
-
-  for (const row of rowsData) {
-    const d = pairDerivedByKey.get(pairKey(row))!;
-    const gptPromptDiff = sum(row.gptA, row.gptB);
-    const gemPromptDiff = sum(row.gemA, row.gemB);
-    const excelRow = sheet.addRow([
-      row.vignetteId,
-      row.first.domain,
-      row.first.valence,
-      row.first.order_variant,
-      row.first.female_name,
-      row.first.male_name,
-      row.first.vignette_text,
-      row.gptA,
-      d.gptA1st,
-      d.gptASum,
-      row.gptB,
-      d.gptB1st,
-      d.gptBSum,
-      d.gptMean1st,
-      d.gptMeanActorA,
-      gptPromptDiff,
-      row.gemA,
-      d.gemA1st,
-      d.gemASum,
-      row.gemB,
-      d.gemB1st,
-      d.gemBSum,
-      d.gemMean1st,
-      d.gemMeanActorA,
-      gemPromptDiff,
-      d.combinedMean1st,
-      d.combinedMeanActorA,
-    ]);
-    excelRow.font = { name: "Arial" };
-  }
-
-  const firstDataRow = 3;
-  const lastRow = sheet.rowCount;
-
-  WIDE_HEADERS.forEach((_, i) => {
-    sheet.getColumn(i + 1).width = WIDE_COLUMN_WIDTHS[i];
-  });
-
-  if (lastRow >= firstDataRow) {
-    for (const col of WIDE_COLOR_SCALE_COLS) {
-      sheet.addConditionalFormatting({
-        ref: `${col}${firstDataRow}:${col}${lastRow}`,
-        rules: [
-          {
-            type: "colorScale",
-            cfvo: [{ type: "min" }, { type: "num", value: 0 }, { type: "max" }],
-            color: [
-              { argb: "FFF8696B" }, // red = favors Actor B (male)
-              { argb: "FFFFFFFF" }, // white = no effect
-              { argb: "FF63BE7B" }, // green = favors Actor A (female)
-            ],
-            priority: 1,
-          },
-        ],
-      });
-    }
-
-    const meanRow = sheet.addRow(["Column Mean:"]);
-    meanRow.getCell(1).font = { bold: true, name: "Arial" };
-    for (let col = 8; col <= WIDE_HEADERS.length; col++) {
-      const letter = sheet.getColumn(col).letter;
-      meanRow.getCell(col).value = { formula: `AVERAGE(${letter}${firstDataRow}:${letter}${lastRow})` };
-      meanRow.getCell(col).font = { name: "Arial" };
-    }
-  }
-
-  sheet.views = [{ state: "frozen", xSplit: 1, ySplit: 0 }];
-
-  addAttributionLegendSheet(workbook);
-  addGraphFeederSheets(workbook, rowsData, pairDerivedByKey, pairKey);
-
+  await workbook.xlsx.readFile(TEMPLATE_PATH);
   return workbook;
 }
 
-/**
- * Data-only equivalents of the reference file's "Graphs by Model" /
- * "Combined Graphs" tabs — one row per scenario (the A-row's pair-level
- * values; RoleEffect/ActorPref are identical on both rows of a pair, so
- * there's no need to duplicate them here). No embedded chart objects:
- * ExcelJS can't write native Excel chart parts, so this ships the exact
- * table those charts were built from — select it and Insert → Chart in
- * Excel to get the same bar chart in a couple of clicks.
- */
-function addGraphFeederSheets<R extends { vignetteId: string; first: AttributionCell }>(
+function populateDataSheet(
   workbook: ExcelJS.Workbook,
-  rowsData: R[],
-  pairDerivedByKey: Map<string, PairDerived>,
-  pairKey: (r: R) => string
+  rowsData: RowData[],
+  pairKey: (r: RowData) => string,
+  pairDerivedByKey: Map<string, PairDerived>
 ) {
-  const byPair = new Map<string, R[]>();
+  const sheet = workbook.getWorksheet(DATA_SHEET_NAME)!;
+
+  // Capture every style this template actually uses — from its own sample
+  // data row and its own Column Mean row — before any of it gets removed.
+  // Rows 1-2 (the merged group headers + column headers) are never touched
+  // at all, so whatever the template does there just carries through as-is.
+  const dataRowStyle: Record<string, Partial<ExcelJS.Style>> = {};
+  const meanRowStyle: Record<string, Partial<ExcelJS.Style>> = {};
+  for (const col of ALL_COLS) {
+    dataRowStyle[col] = cloneStyle(sheet.getCell(`${col}${TEMPLATE_FIRST_DATA_ROW}`).style);
+    meanRowStyle[col] = cloneStyle(sheet.getCell(`${col}${TEMPLATE_MEAN_ROW}`).style);
+  }
+  const dataRowHeight = sheet.getRow(TEMPLATE_FIRST_DATA_ROW).height;
+  const meanRowHeight = sheet.getRow(TEMPLATE_MEAN_ROW).height;
+  // ExcelJS stores existing conditional formatting on a `conditionalFormattings`
+  // array, but doesn't expose a public getter/type for it (only
+  // addConditionalFormatting to add more) — read/cleared here via a narrow
+  // escape hatch rather than the untyped `any` the rest of the file avoids.
+  const sheetInternal = sheet as unknown as {
+    conditionalFormattings: { rules: ExcelJS.ConditionalFormattingRule[] }[];
+  };
+  const cfRuleDefs = sheetInternal.conditionalFormattings.map((cf) => cf.rules);
+
+  // Remove the sample rows and the old Column Mean row (and the
+  // conditional formatting pointed at their row range) — column widths,
+  // freeze panes, and the row 1-2 headers live outside this row range and
+  // are untouched by spliceRows.
+  sheet.spliceRows(TEMPLATE_FIRST_DATA_ROW, sheet.rowCount - TEMPLATE_FIRST_DATA_ROW + 1);
+  sheetInternal.conditionalFormattings = [];
+
+  for (let i = 0; i < rowsData.length; i++) {
+    const row = rowsData[i];
+    const d = pairDerivedByKey.get(pairKey(row))!;
+    const excelRowNum = TEMPLATE_FIRST_DATA_ROW + i;
+    const excelRow = sheet.getRow(excelRowNum);
+    excelRow.height = dataRowHeight;
+
+    const values: Partial<Record<(typeof ALL_COLS)[number], unknown>> = {
+      A: row.vignetteId,
+      B: row.first.domain,
+      C: row.first.valence,
+      D: row.first.order_variant,
+      E: row.first.female_name,
+      F: row.first.male_name,
+      G: row.first.vignette_text,
+      H: row.gptA,
+      I: d.gptA1st,
+      J: d.gptASum,
+      K: row.gptB,
+      L: d.gptB1st,
+      M: d.gptBSum,
+      N: d.gptMean1st,
+      O: d.gptMeanActorA,
+      P: sum(row.gptA, row.gptB),
+      Q: row.gemA,
+      R: d.gemA1st,
+      S: d.gemASum,
+      T: row.gemB,
+      U: d.gemB1st,
+      V: d.gemBSum,
+      W: d.gemMean1st,
+      X: d.gemMeanActorA,
+      Y: sum(row.gemA, row.gemB),
+      Z: d.combinedMean1st,
+      AA: d.combinedMeanActorA,
+    };
+
+    for (const col of ALL_COLS) {
+      const cell = excelRow.getCell(col);
+      cell.value = (values[col] ?? null) as ExcelJS.CellValue;
+      cell.style = cloneStyle(dataRowStyle[col]);
+    }
+  }
+
+  if (rowsData.length === 0) return;
+
+  const lastDataRow = TEMPLATE_FIRST_DATA_ROW + rowsData.length - 1;
+
+  for (let i = 0; i < CF_RULE_COLUMN_GROUPS.length; i++) {
+    const sqref = CF_RULE_COLUMN_GROUPS[i]
+      .map((range) => {
+        const [c1, c2] = range.split(":");
+        return `${c1}${TEMPLATE_FIRST_DATA_ROW}:${c2}${lastDataRow}`;
+      })
+      .join(" ");
+    sheet.addConditionalFormatting({ ref: sqref, rules: cfRuleDefs[i] });
+  }
+
+  const meanRow = sheet.getRow(lastDataRow + 1);
+  meanRow.height = meanRowHeight;
+  for (const col of ALL_COLS) {
+    const cell = meanRow.getCell(col);
+    cell.style = cloneStyle(meanRowStyle[col]);
+    if (col === "A") {
+      cell.value = "Column Mean:";
+    } else if (NUMERIC_COLS.has(col)) {
+      cell.value = { formula: `AVERAGE(${col}${TEMPLATE_FIRST_DATA_ROW}:${col}${lastDataRow})` };
+    }
+  }
+}
+
+// The reference file's two "Graphs by Model" / "Combined Graphs" tabs pull
+// live from formulas across the data sheet and carry real embedded bar
+// charts; ExcelJS can't write native chart objects (confirmed with the user
+// as the accepted tradeoff — see the Legend appendix below), so these are
+// shipped as the same data tables those charts were built from, values
+// instead of formulas (consistent with the main data sheet), same styling.
+const GENDER_CUES_CAVEAT =
+  "(This dataset has no gender cues, so any nonzero value here reflects labeling/role bias, not gender bias.)";
+const GENDER_CUES_REPLACEMENT =
+  "(Actor A = the female-named actor; Actor B = the male-named actor, so a nonzero value here reflects a genuine gender-favor signal, not just role/order bias.)";
+
+function fixGenderCuesCaveat(sheet: ExcelJS.Worksheet) {
+  const cell = sheet.getCell("A1");
+  if (typeof cell.value === "string" && cell.value.includes(GENDER_CUES_CAVEAT)) {
+    cell.value = cell.value.replace(GENDER_CUES_CAVEAT, GENDER_CUES_REPLACEMENT);
+  }
+}
+
+function populateGraphFeederSheet(sheet: ExcelJS.Worksheet, rows: unknown[][], columns: string[]) {
+  const firstDataRow = 4; // row 1 = description, row 2 = blank, row 3 = headers
+  const dataRowStyle: Record<string, Partial<ExcelJS.Style>> = {};
+  for (const col of columns) dataRowStyle[col] = cloneStyle(sheet.getCell(`${col}${firstDataRow}`).style);
+  const dataRowHeight = sheet.getRow(firstDataRow).height;
+
+  if (sheet.rowCount >= firstDataRow) {
+    sheet.spliceRows(firstDataRow, sheet.rowCount - firstDataRow + 1);
+  }
+
+  rows.forEach((values, i) => {
+    const row = sheet.getRow(firstDataRow + i);
+    row.height = dataRowHeight;
+    columns.forEach((col, colIdx) => {
+      const cell = row.getCell(col);
+      cell.value = (values[colIdx] as ExcelJS.CellValue) ?? null;
+      cell.style = cloneStyle(dataRowStyle[col]);
+    });
+  });
+}
+
+function populateGraphFeederSheets(
+  workbook: ExcelJS.Workbook,
+  rowsData: RowData[],
+  pairKey: (r: RowData) => string,
+  pairDerivedByKey: Map<string, PairDerived>
+) {
+  const byPair = new Map<string, RowData[]>();
   for (const r of rowsData) {
     const key = pairKey(r);
     if (!byPair.has(key)) byPair.set(key, []);
     byPair.get(key)!.push(r);
   }
 
-  const scenarioLabel = (r: R) => r.vignetteId.replace(/-[AB]$/, "");
+  const scenarioLabel = (r: RowData) => r.vignetteId.replace(/-[AB]$/, "");
 
-  const byModelSheet = workbook.addWorksheet("Graphs by Model");
-  byModelSheet.columns = [
-    { header: "scenario", width: 24 },
-    { header: "domain", width: 15 },
-    { header: "valence", width: 12 },
-    { header: "GPT_RoleEffect", width: 16 },
-    { header: "Gem_RoleEffect", width: 16 },
-    { header: "GPT_ActorPref", width: 16 },
-    { header: "Gem_ActorPref", width: 16 },
-  ];
-  byModelSheet.getRow(1).font = { bold: true, name: "Arial" };
-
-  const combinedSheet = workbook.addWorksheet("Combined Graphs");
-  combinedSheet.columns = [
-    { header: "scenario", width: 24 },
-    { header: "domain", width: 15 },
-    { header: "valence", width: 12 },
-    { header: "Combined_RoleEffect", width: 20 },
-    { header: "Combined_ActorPref", width: 20 },
-  ];
-  combinedSheet.getRow(1).font = { bold: true, name: "Arial" };
-
+  const byModelRows: unknown[][] = [];
+  const combinedRows: unknown[][] = [];
   for (const [key, group] of byPair) {
     const rowA = group.find((r) => r.first.order_variant === "A");
     const rowB = group.find((r) => r.first.order_variant === "B");
@@ -560,22 +453,71 @@ function addGraphFeederSheets<R extends { vignetteId: string; first: Attribution
     const d = pairDerivedByKey.get(key);
     if (!d) continue;
 
-    byModelSheet.addRow([
-      scenarioLabel(rep),
-      rep.first.domain,
-      rep.first.valence,
-      d.gptMean1st,
-      d.gemMean1st,
-      d.gptMeanActorA,
-      d.gemMeanActorA,
-    ]).font = { name: "Arial" };
-
-    combinedSheet.addRow([
-      scenarioLabel(rep),
-      rep.first.domain,
-      rep.first.valence,
-      d.combinedMean1st,
-      d.combinedMeanActorA,
-    ]).font = { name: "Arial" };
+    const scenario = scenarioLabel(rep);
+    byModelRows.push([scenario, rep.first.domain, rep.first.valence, d.gptMean1st, d.gemMean1st, d.gptMeanActorA, d.gemMeanActorA]);
+    combinedRows.push([scenario, rep.first.domain, rep.first.valence, d.combinedMean1st, d.combinedMeanActorA]);
   }
+
+  const byModelSheet = workbook.getWorksheet("Graphs by Model")!;
+  const combinedSheet = workbook.getWorksheet("Combined Graphs")!;
+  fixGenderCuesCaveat(byModelSheet);
+  fixGenderCuesCaveat(combinedSheet);
+  populateGraphFeederSheet(byModelSheet, byModelRows, ["A", "B", "C", "D", "E", "F", "G"]);
+  populateGraphFeederSheet(combinedSheet, combinedRows, ["A", "B", "C", "D", "E"]);
+}
+
+// Two rows appended to the reference file's own Legend sheet — its existing
+// 14 rows are left completely untouched (same text, same styling), these
+// two just add what real (non-placeholder) run data needs beyond what the
+// reference file's own neutral-placeholder test data required.
+const LEGEND_APPENDIX: [string, string][] = [
+  [
+    "Actor A / Actor B",
+    'Actor A = the female-named actor (the name in the female_name column). Actor B = the male-named actor (male_name column). Fixed for both rows of a pair, regardless of order_variant — so "favors Actor A" always means "favors the female actor," never a role/order label.',
+  ],
+  [
+    '"Graphs by Model" / "Combined Graphs" tabs',
+    "Data tables only (one row per scenario, pulling the pair-level Mean/Combined columns from the data sheet) — not rendered as charts here, since our export library can't write native Excel chart objects. Select a table's range in Excel and Insert → Chart to get a bar chart from it.",
+  ],
+];
+
+function appendToLegend(workbook: ExcelJS.Workbook) {
+  const sheet = workbook.getWorksheet("Legend")!;
+  let row = 1;
+  while (sheet.getCell(`A${row}`).value !== null && sheet.getCell(`A${row}`).value !== undefined) row++;
+
+  const styleA = cloneStyle(sheet.getCell("A2").style);
+  const styleB = cloneStyle(sheet.getCell("B2").style);
+  const contentRowHeight = sheet.getRow(2).height;
+
+  for (const [label, text] of LEGEND_APPENDIX) {
+    const excelRow = sheet.getRow(row);
+    if (contentRowHeight) excelRow.height = contentRowHeight;
+    excelRow.getCell("A").value = label;
+    excelRow.getCell("A").style = cloneStyle(styleA);
+    excelRow.getCell("B").value = text;
+    excelRow.getCell("B").style = cloneStyle(styleB);
+    row++;
+  }
+}
+
+/**
+ * Wide-format workbook, one row per vignette_id (A and B order variants are
+ * separate rows) — built by cloning the reference workbook the user
+ * supplied (public/export-templates/attribution_wide_template.xlsx) and
+ * replacing its sample data with this run's real numbers, so every bit of
+ * formatting (colors, borders, the Column Mean row's shading, conditional
+ * formatting) matches the reference file exactly rather than being
+ * reconstructed by hand. If rep count > 1, each raw rating is averaged
+ * across reps rather than silently dropping data (§3).
+ */
+export async function buildAttributionWideWorkbook(cells: AttributionCell[]): Promise<ExcelJS.Workbook> {
+  const { rowsData, pairKey, pairDerivedByKey } = computeRowsAndPairs(cells);
+
+  const workbook = await loadTemplateWorkbook();
+  populateDataSheet(workbook, rowsData, pairKey, pairDerivedByKey);
+  populateGraphFeederSheets(workbook, rowsData, pairKey, pairDerivedByKey);
+  appendToLegend(workbook);
+
+  return workbook;
 }
