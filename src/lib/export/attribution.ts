@@ -480,26 +480,6 @@ function populateGraphFeederSheets(
   populateGraphFeederSheet(combinedSheet, combinedRows, ["A", "B", "C", "D", "E"]);
 }
 
-// Two rows appended to the reference file's own Legend sheet — its existing
-// 14 rows are left completely untouched (same text, same styling), these
-// two just add what real (non-placeholder) run data needs beyond what the
-// reference file's own neutral-placeholder test data required. Third
-// element is the same row's plain-English translation — see
-// LEGEND_PLAIN_ENGLISH below for why that's a separate column rather than
-// folded into the existing "What it means" text.
-const LEGEND_APPENDIX: [string, string, string][] = [
-  [
-    "Actor A / Actor B",
-    'Actor A = the female-named actor (the name in the female_name column). Actor B = the male-named actor (male_name column). Fixed for both rows of a pair, regardless of order_variant — so "favors Actor A" always means "favors the female actor," never a role/order label.',
-    "\"Actor A\" always means the female character, and \"Actor B\" always means the male character — no matter which one is mentioned first in the story.",
-  ],
-  [
-    '"Graphs by Model" / "Combined Graphs" tabs',
-    "Data tables only (one row per scenario, pulling the pair-level Mean/Combined columns from the data sheet) — not rendered as charts here, since our export library can't write native Excel chart objects. Select a table's range in Excel and Insert → Chart to get a bar chart from it.",
-    "The two \"Graphs\" tabs are just the key numbers from above, laid out so you (or Excel) can turn them into a chart if you want one.",
-  ],
-];
-
 // Plain-English translation of the reference file's own 14 Legend rows
 // (rows 2-14 — row 1 is the header) — same order, added as a new column
 // (C) rather than replacing "What it means", so the exact, precise
@@ -535,18 +515,15 @@ const LEGEND_PLAIN_ENGLISH: string[] = [
   "The average of each column across every story in this run, so you get one overall number per column instead of scrolling through every row.",
 ];
 
-function appendToLegend(workbook: ExcelJS.Workbook) {
+function addPlainEnglishColumn(workbook: ExcelJS.Workbook) {
   const sheet = workbook.getWorksheet("Legend")!;
-  let row = 1;
-  while (sheet.getCell(`A${row}`).value !== null && sheet.getCell(`A${row}`).value !== undefined) row++;
-
-  const styleA = cloneStyle(sheet.getCell("A2").style);
   const styleB = cloneStyle(sheet.getCell("B2").style);
-  const contentRowHeight = sheet.getRow(2).height;
 
-  // "In English" column — header cloned from the existing A1/B1 header
-  // style, content cells cloned from B's own content style (same font/wrap,
-  // just a new column) so it reads as part of the same sheet, not a bolt-on.
+  // "In English" column — header cloned from the existing B1 header style,
+  // content cells cloned from B's own content style (same font/wrap, just a
+  // new column) so it reads as part of the same sheet, not a bolt-on. The
+  // reference file's own 14 rows (and their A/B content) are otherwise left
+  // completely untouched — this only ever adds column C.
   sheet.getColumn("C").width = 90;
   sheet.getCell("C1").value = "In English";
   sheet.getCell("C1").style = cloneStyle(sheet.getCell("B1").style);
@@ -555,18 +532,6 @@ function appendToLegend(workbook: ExcelJS.Workbook) {
     excelRow.getCell("C").value = text;
     excelRow.getCell("C").style = cloneStyle(styleB);
   });
-
-  for (const [label, text, plain] of LEGEND_APPENDIX) {
-    const excelRow = sheet.getRow(row);
-    if (contentRowHeight) excelRow.height = contentRowHeight;
-    excelRow.getCell("A").value = label;
-    excelRow.getCell("A").style = cloneStyle(styleA);
-    excelRow.getCell("B").value = text;
-    excelRow.getCell("B").style = cloneStyle(styleB);
-    excelRow.getCell("C").value = plain;
-    excelRow.getCell("C").style = cloneStyle(styleB);
-    row++;
-  }
 }
 
 /**
@@ -587,7 +552,7 @@ export async function buildAttributionWideWorkbook(cells: AttributionCell[]): Pr
   const workbook = await loadTemplateWorkbook();
   populateDataSheet(workbook, rowsData, pairKey, pairDerivedByKey);
   populateGraphFeederSheets(workbook, rowsData, pairKey, pairDerivedByKey);
-  appendToLegend(workbook);
+  addPlainEnglishColumn(workbook);
   // Last tab — supplementary to the summarized/graph sheets above, not the
   // first thing someone opening the file should see.
   addRawDataSheet(workbook, cells);
