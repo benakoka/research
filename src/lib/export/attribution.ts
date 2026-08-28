@@ -1,7 +1,6 @@
 import ExcelJS from "exceljs";
 import path from "node:path";
 import { AttributionCell } from "@/lib/types";
-import { toCsv } from "@/lib/csv";
 
 const LONG_HEADERS = [
   "vignette_id",
@@ -49,28 +48,43 @@ function favorFemale(cell: AttributionCell): number | null {
   return cell.valence === "blame" ? -femaleResponsibility : femaleResponsibility;
 }
 
-/** Long-format CSV matching the DMP schema (§3 Output). */
-export function buildAttributionLongCsv(cells: AttributionCell[]): string {
-  const rows = cells.map((c) => [
-    c.vignette_id,
-    c.domain,
-    c.valence,
-    c.scenario_number,
-    c.order_variant,
-    c.female_name,
-    c.male_name,
-    c.scale_direction,
-    c.plus50_name,
-    c.minus50_name,
-    c.model,
-    c.model_snapshot,
-    c.rep,
-    c.rating,
-    favorFemale(c),
-    c.raw_response,
-    c.timestamp,
-  ]);
-  return toCsv([...LONG_HEADERS], rows);
+/**
+ * Long-format raw data, one row per model call — every cell this run
+ * produced, matching the DMP schema (§3 Output). Used to be its own
+ * downloadable CSV; now lives as a "Raw Data" tab inside the wide XLSX so
+ * there's one export file instead of two, but the row shape is unchanged.
+ */
+function addRawDataSheet(workbook: ExcelJS.Workbook, cells: AttributionCell[]) {
+  const sheet = workbook.addWorksheet("Raw Data");
+  sheet.addRow([...LONG_HEADERS]);
+  sheet.getRow(1).font = { bold: true };
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+  for (const c of cells) {
+    sheet.addRow([
+      c.vignette_id,
+      c.domain,
+      c.valence,
+      c.scenario_number,
+      c.order_variant,
+      c.female_name,
+      c.male_name,
+      c.scale_direction,
+      c.plus50_name,
+      c.minus50_name,
+      c.model,
+      c.model_snapshot,
+      c.rep,
+      c.rating,
+      favorFemale(c),
+      c.raw_response,
+      c.timestamp,
+    ]);
+  }
+
+  sheet.columns.forEach((col) => {
+    col.width = 16;
+  });
 }
 
 // The wide export is built by cloning the user-supplied reference workbook
@@ -509,7 +523,9 @@ function appendToLegend(workbook: ExcelJS.Workbook) {
  * formatting (colors, borders, the Column Mean row's shading, conditional
  * formatting) matches the reference file exactly rather than being
  * reconstructed by hand. If rep count > 1, each raw rating is averaged
- * across reps rather than silently dropping data (§3).
+ * across reps rather than silently dropping data (§3). Also carries a
+ * "Raw Data" tab (every individual model call, long format) — this is now
+ * the one export file; there's no separate long-CSV download anymore.
  */
 export async function buildAttributionWideWorkbook(cells: AttributionCell[]): Promise<ExcelJS.Workbook> {
   const { rowsData, pairKey, pairDerivedByKey } = computeRowsAndPairs(cells);
@@ -518,6 +534,9 @@ export async function buildAttributionWideWorkbook(cells: AttributionCell[]): Pr
   populateDataSheet(workbook, rowsData, pairKey, pairDerivedByKey);
   populateGraphFeederSheets(workbook, rowsData, pairKey, pairDerivedByKey);
   appendToLegend(workbook);
+  // Last tab — supplementary to the summarized/graph sheets above, not the
+  // first thing someone opening the file should see.
+  addRawDataSheet(workbook, cells);
 
   return workbook;
 }

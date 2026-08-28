@@ -49,7 +49,7 @@ export default function AttributionPage() {
   const [run, setRun] = useState<AttributionRun | null>(null);
   const [starting, setStarting] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [exporting, setExporting] = useState<"long" | "wide" | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Separate from `error` (which is transient, about the last batch/export
@@ -283,22 +283,22 @@ export default function AttributionPage() {
     }
   }
 
-  async function exportRun(format: "long" | "wide") {
+  async function exportRun() {
     if (!run) return;
-    setExporting(format);
+    setExporting(true);
     setError(null);
     try {
       const res = await fetch("/api/attribution/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cells: run.cells, format }),
+        body: JSON.stringify({ cells: run.cells }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? "Export failed.");
       }
       const blob = await res.blob();
-      downloadBlob(blob, `attribution_${format}.${format === "long" ? "csv" : "xlsx"}`);
+      downloadBlob(blob, "attribution.xlsx");
       // A successful export is a durable copy outside this browser's
       // storage, so whatever the local-save situation is no longer matters
       // for anything already in the file.
@@ -306,7 +306,7 @@ export default function AttributionPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed.");
     } finally {
-      setExporting(null);
+      setExporting(false);
     }
   }
 
@@ -409,18 +409,11 @@ export default function AttributionPage() {
 
             <div className="mt-4 flex gap-3">
               <button
-                onClick={() => exportRun("long")}
-                disabled={exporting !== null}
+                onClick={() => exportRun()}
+                disabled={exporting}
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
-                {exporting === "long" ? "Exporting…" : "Export long CSV"}
-              </button>
-              <button
-                onClick={() => exportRun("wide")}
-                disabled={exporting !== null}
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                {exporting === "wide" ? "Exporting…" : "Export wide XLSX"}
+                {exporting ? "Exporting…" : "Export XLSX"}
               </button>
             </div>
           </section>

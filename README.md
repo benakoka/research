@@ -160,6 +160,13 @@ from the other columns — don't type it by hand.
   model runs once) — configurable in Settings, but nothing in the app
   assumes reps > 1. The wide-format Attribution export averages across reps
   if it's ever raised.
+- Attribution has one export file, not two: a single XLSX (built by cloning
+  `public/export-templates/attribution_wide_template.xlsx` and replacing its
+  sample data — see `lib/export/attribution.ts`) with a "Legend", the
+  "Attribution Summarized Data" sheet, "Graphs by Model"/"Combined Graphs"
+  data tables, and a "Raw Data" tab carrying every individual model call
+  (what used to be a separate long-format CSV download). Rewriting still
+  exports a separate long CSV + wide XLSX.
 - Rewriting protocol (confirmed): each generation is built from the
   *previous* generation's finished text (a true transmission chain, not five
   independent rewrites of the seed). A miss against its word-count target (±
