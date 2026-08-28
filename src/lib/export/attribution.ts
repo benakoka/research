@@ -483,16 +483,56 @@ function populateGraphFeederSheets(
 // Two rows appended to the reference file's own Legend sheet — its existing
 // 14 rows are left completely untouched (same text, same styling), these
 // two just add what real (non-placeholder) run data needs beyond what the
-// reference file's own neutral-placeholder test data required.
-const LEGEND_APPENDIX: [string, string][] = [
+// reference file's own neutral-placeholder test data required. Third
+// element is the same row's plain-English translation — see
+// LEGEND_PLAIN_ENGLISH below for why that's a separate column rather than
+// folded into the existing "What it means" text.
+const LEGEND_APPENDIX: [string, string, string][] = [
   [
     "Actor A / Actor B",
     'Actor A = the female-named actor (the name in the female_name column). Actor B = the male-named actor (male_name column). Fixed for both rows of a pair, regardless of order_variant — so "favors Actor A" always means "favors the female actor," never a role/order label.',
+    "\"Actor A\" always means the female character, and \"Actor B\" always means the male character — no matter which one is mentioned first in the story.",
   ],
   [
     '"Graphs by Model" / "Combined Graphs" tabs',
     "Data tables only (one row per scenario, pulling the pair-level Mean/Combined columns from the data sheet) — not rendered as charts here, since our export library can't write native Excel chart objects. Select a table's range in Excel and Insert → Chart to get a bar chart from it.",
+    "The two \"Graphs\" tabs are just the key numbers from above, laid out so you (or Excel) can turn them into a chart if you want one.",
   ],
+];
+
+// Plain-English translation of the reference file's own 14 Legend rows
+// (rows 2-14 — row 1 is the header) — same order, added as a new column
+// (C) rather than replacing "What it means", so the exact, precise
+// definitions stay exactly as the reference file wrote them and this is
+// purely additive: read column B for the precise formula, column C for the
+// one-sentence version.
+const LEGEND_PLAIN_ENGLISH: string[] = [
+  // row 2: pass-through columns
+  "These columns just repeat information from your original story file — which story it is, what topic it's about, whether it's a \"credit\" story or a \"blame\" story, which version (A or B) of the story this is, the two characters' names, and the story text itself.",
+  // row 3: GPT_ARating / Gem_ARating
+  "The actual score the AI gave when Actor A was the one being praised or blamed. A positive number means the AI leaned toward Actor A.",
+  // row 4: GPT_A_1stAction_Pref / Gem_A_1stAction_Pref
+  "Checks whether Actor A's score changed just because of which order the actors appeared in the story — not who they are, just whether Actor A acted first or second that time.",
+  // row 5: GPT_A_ActorA_Pref / Gem_A_ActorA_Pref
+  "A behind-the-scenes math step — combines two of Actor A's scores so they can be compared against Actor B's a few columns over. Not meaningful to read on its own.",
+  // row 6: GPT_B_Rating / Gem_B_Rating
+  "Same idea as the ARating column, but this time Actor B is the one being praised or blamed. A positive number means the AI leaned toward Actor B.",
+  // row 7: GPT_B_1stAction_Pref / Gem_B_1stAction_Pref
+  "The same order-effect check as a few columns back, just calculated from Actor B's scores instead of Actor A's, and flipped so it points the same direction.",
+  // row 8: GPT_B_ActorA_Pref / Gem_B_Actor_APref
+  "Another behind-the-scenes math step, like the one above — combines two of Actor B's scores. Not meaningful to read on its own.",
+  // row 9: GPTMean_1stAction_Pref / Gem_1stAction_Pref
+  "THE KEY NUMBER for order bias: does the AI favor whichever character comes first in the story, regardless of who that character is? A big number (positive or negative) means yes; close to zero means no.",
+  // row 10: GPTMean_ActorA_Pref / Gem_ActorA_Pref
+  "THE KEY NUMBER for gender bias: does the AI favor the female character over the male character (or vice versa), no matter which order they appear in? Positive = favored the woman. Negative = favored the man. Close to zero = no favoritism either way.",
+  // row 11: GPT_Prompt_Diff / Gem_Prompt_Diff
+  "A sanity check, not a bias measurement — makes sure the AI is being consistent with itself on the very same story, rather than just randomly picking a side each time.",
+  // row 12: Combined_mean_1stAction_Pref
+  "The order-bias number from a few rows up, but averaged between both AI models (ChatGPT and Gemini) into one combined number.",
+  // row 13: Combined_mean_ActorA_Pref
+  "THE KEY NUMBER, combined: the gender-bias number from a few rows up, averaged between both AI models into one overall number. Usually the single most important column on this sheet.",
+  // row 14: Column Mean row
+  "The average of each column across every story in this run, so you get one overall number per column instead of scrolling through every row.",
 ];
 
 function appendToLegend(workbook: ExcelJS.Workbook) {
@@ -504,13 +544,27 @@ function appendToLegend(workbook: ExcelJS.Workbook) {
   const styleB = cloneStyle(sheet.getCell("B2").style);
   const contentRowHeight = sheet.getRow(2).height;
 
-  for (const [label, text] of LEGEND_APPENDIX) {
+  // "In English" column — header cloned from the existing A1/B1 header
+  // style, content cells cloned from B's own content style (same font/wrap,
+  // just a new column) so it reads as part of the same sheet, not a bolt-on.
+  sheet.getColumn("C").width = 90;
+  sheet.getCell("C1").value = "In English";
+  sheet.getCell("C1").style = cloneStyle(sheet.getCell("B1").style);
+  LEGEND_PLAIN_ENGLISH.forEach((text, i) => {
+    const excelRow = sheet.getRow(2 + i); // rows 2-14, the reference file's own rows
+    excelRow.getCell("C").value = text;
+    excelRow.getCell("C").style = cloneStyle(styleB);
+  });
+
+  for (const [label, text, plain] of LEGEND_APPENDIX) {
     const excelRow = sheet.getRow(row);
     if (contentRowHeight) excelRow.height = contentRowHeight;
     excelRow.getCell("A").value = label;
     excelRow.getCell("A").style = cloneStyle(styleA);
     excelRow.getCell("B").value = text;
     excelRow.getCell("B").style = cloneStyle(styleB);
+    excelRow.getCell("C").value = plain;
+    excelRow.getCell("C").style = cloneStyle(styleB);
     row++;
   }
 }
