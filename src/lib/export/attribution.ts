@@ -16,9 +16,9 @@ const LONG_HEADERS = [
   "model",
   "model_snapshot",
   "rep",
+  "raw_response",
   "rating",
   "favor_female",
-  "raw_response",
   "timestamp",
 ] as const;
 
@@ -75,9 +75,9 @@ function addRawDataSheet(workbook: ExcelJS.Workbook, cells: AttributionCell[]) {
       c.model,
       c.model_snapshot,
       c.rep,
+      c.raw_response,
       c.rating,
       favorFemale(c),
-      c.raw_response,
       c.timestamp,
     ]);
   }
