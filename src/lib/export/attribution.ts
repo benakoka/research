@@ -381,7 +381,15 @@ function clearTemplateSampleRows(sheet: ExcelJS.Worksheet) {
   const sheetInternal = sheet as unknown as {
     conditionalFormattings: { rules: ExcelJS.ConditionalFormattingRule[] }[];
   };
-  sheet.spliceRows(TEMPLATE_FIRST_DATA_ROW, sheet.rowCount - TEMPLATE_FIRST_DATA_ROW + 1);
+  // sheet.rowCount is NOT how many rows actually have content — it reflects
+  // the template's declared <dimension> XML range, which can run well past
+  // the real last row. Sizing spliceRows off it silently removes nothing
+  // (it tries to remove far more rows than exist), leaving every sample row
+  // — and the old Column Mean row — in place beneath whatever real data
+  // gets written next. sheet.dimensions.bottom is the actual last populated
+  // row.
+  const templateLastRow = sheet.dimensions.bottom;
+  sheet.spliceRows(TEMPLATE_FIRST_DATA_ROW, templateLastRow - TEMPLATE_FIRST_DATA_ROW + 1);
   sheetInternal.conditionalFormattings = [];
 }
 
@@ -569,8 +577,12 @@ function populateGraphFeederSheet(sheet: ExcelJS.Worksheet, rows: unknown[][], c
   for (const col of columns) dataRowStyle[col] = cloneStyle(sheet.getCell(`${col}${firstDataRow}`).style);
   const dataRowHeight = sheet.getRow(firstDataRow).height;
 
-  if (sheet.rowCount >= firstDataRow) {
-    sheet.spliceRows(firstDataRow, sheet.rowCount - firstDataRow + 1);
+  // See the matching comment in clearTemplateSampleRows — sheet.rowCount
+  // reflects the template's declared dimension range, not real content;
+  // sheet.dimensions.bottom is the actual last populated row.
+  const lastRealRow = sheet.dimensions.bottom;
+  if (lastRealRow >= firstDataRow) {
+    sheet.spliceRows(firstDataRow, lastRealRow - firstDataRow + 1);
   }
 
   rows.forEach((values, i) => {
