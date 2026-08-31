@@ -159,6 +159,10 @@ function sum(a: number | null | undefined, b: number | null | undefined): number
   return a !== null && a !== undefined && b !== null && b !== undefined ? a + b : null;
 }
 
+function halve(a: number | null): number | null {
+  return a !== null ? a / 2 : null;
+}
+
 /**
  * Pair-level derived values — every one of these is a fixed "A row minus
  * (or plus) B row" calculation, so the same value is written to both rows
@@ -239,12 +243,16 @@ function computeRowsAndPairs(cells: AttributionCell[]) {
     const valence = (rowA ?? rowB)?.first.valence;
     const sign = valence === "blame" ? -1 : 1;
 
-    const gptA1st = diff(rowA?.gptA, rowB?.gptA);
+    // Halved per the professor's request — A_1stAction_Pref and
+    // B_1stAction_Pref are each /2 on top of the existing diff/sign-flip;
+    // GPTMean_1stAction_Pref below is unchanged (still just AVERAGE of
+    // these two), so it inherits the halving automatically.
+    const gptA1st = halve(diff(rowA?.gptA, rowB?.gptA));
     const gptB1stRaw = diff(rowA?.gptB, rowB?.gptB);
     // B_1stAction_Pref is pre-negated relative to A_1stAction_Pref so both
     // land on the same "Role1 minus Role2" scale, regardless of which actor
     // happened to hold which role (see Legend).
-    const gptB1st = gptB1stRaw !== null ? -1 * gptB1stRaw : null;
+    const gptB1st = gptB1stRaw !== null ? (-1 * gptB1stRaw) / 2 : null;
     const gptMean1stRaw = average([gptA1st, gptB1st].filter((n): n is number => n !== null));
     const gptMean1st = gptMean1stRaw !== null ? sign * gptMean1stRaw : null;
 
@@ -253,9 +261,9 @@ function computeRowsAndPairs(cells: AttributionCell[]) {
     const gptActorARaw = diff(gptASum, gptBSum);
     const gptMeanActorA = gptActorARaw !== null ? (sign * gptActorARaw) / 4 : null;
 
-    const gemA1st = diff(rowA?.gemA, rowB?.gemA);
+    const gemA1st = halve(diff(rowA?.gemA, rowB?.gemA));
     const gemB1stRaw = diff(rowA?.gemB, rowB?.gemB);
-    const gemB1st = gemB1stRaw !== null ? -1 * gemB1stRaw : null;
+    const gemB1st = gemB1stRaw !== null ? (-1 * gemB1stRaw) / 2 : null;
     const gemMean1stRaw = average([gemA1st, gemB1st].filter((n): n is number => n !== null));
     const gemMean1st = gemMean1stRaw !== null ? sign * gemMean1stRaw : null;
 
@@ -355,7 +363,7 @@ function populateDataSheet(
       M: d.gptBSum,
       N: d.gptMean1st,
       O: d.gptMeanActorA,
-      P: sum(row.gptA, row.gptB),
+      P: halve(sum(row.gptA, row.gptB)), // GPT_Prompt_Diff, halved per the professor's request
       Q: row.gemA,
       R: d.gemA1st,
       S: d.gemASum,
@@ -364,7 +372,7 @@ function populateDataSheet(
       V: d.gemBSum,
       W: d.gemMean1st,
       X: d.gemMeanActorA,
-      Y: sum(row.gemA, row.gemB),
+      Y: halve(sum(row.gemA, row.gemB)), // Gem_Prompt_Diff, halved per the professor's request
       Z: d.combinedMean1st,
       AA: d.combinedMeanActorA,
     };
@@ -492,13 +500,13 @@ const LEGEND_PLAIN_ENGLISH: string[] = [
   // row 3: GPT_ARating / Gem_ARating
   "The actual score the AI gave when Actor A was the one being praised or blamed. A positive number means the AI leaned toward Actor A.",
   // row 4: GPT_A_1stAction_Pref / Gem_A_1stAction_Pref
-  "Checks whether Actor A's score changed just because of which order the actors appeared in the story — not who they are, just whether Actor A acted first or second that time.",
+  "Checks whether Actor A's score changed just because of which order the actors appeared in the story — not who they are, just whether Actor A acted first or second that time. (Halved — the result you see is this check's raw difference divided by two.)",
   // row 5: GPT_A_ActorA_Pref / Gem_A_ActorA_Pref
   "A behind-the-scenes math step — combines two of Actor A's scores so they can be compared against Actor B's a few columns over. Not meaningful to read on its own.",
   // row 6: GPT_B_Rating / Gem_B_Rating
   "Same idea as the ARating column, but this time Actor B is the one being praised or blamed. A positive number means the AI leaned toward Actor B.",
   // row 7: GPT_B_1stAction_Pref / Gem_B_1stAction_Pref
-  "The same order-effect check as a few columns back, just calculated from Actor B's scores instead of Actor A's, and flipped so it points the same direction.",
+  "The same order-effect check as a few columns back, just calculated from Actor B's scores instead of Actor A's, and flipped so it points the same direction. (Also halved, same as the Actor A version.)",
   // row 8: GPT_B_ActorA_Pref / Gem_B_Actor_APref
   "Another behind-the-scenes math step, like the one above — combines two of Actor B's scores. Not meaningful to read on its own.",
   // row 9: GPTMean_1stAction_Pref / Gem_1stAction_Pref
@@ -506,7 +514,7 @@ const LEGEND_PLAIN_ENGLISH: string[] = [
   // row 10: GPTMean_ActorA_Pref / Gem_ActorA_Pref
   "THE KEY NUMBER for gender bias: does the AI favor the female character over the male character (or vice versa), no matter which order they appear in? Positive = favored the woman. Negative = favored the man. Close to zero = no favoritism either way.",
   // row 11: GPT_Prompt_Diff / Gem_Prompt_Diff
-  "A sanity check, not a bias measurement — makes sure the AI is being consistent with itself on the very same story, rather than just randomly picking a side each time.",
+  "A sanity check, not a bias measurement — makes sure the AI is being consistent with itself on the very same story, rather than just randomly picking a side each time. (Halved — this is the raw sum divided by two.)",
   // row 12: Combined_mean_1stAction_Pref
   "The order-bias number from a few rows up, but averaged between both AI models (ChatGPT and Gemini) into one combined number.",
   // row 13: Combined_mean_ActorA_Pref
