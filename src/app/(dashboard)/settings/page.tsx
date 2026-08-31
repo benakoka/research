@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSettings, saveSettings } from "@/lib/clientStorage";
-import { Settings, Domain, Valence } from "@/lib/types";
+import { Settings, Domain, Valence, DEFAULT_ATTRIBUTION_PROMPT } from "@/lib/types";
 import { DOMAIN_VALENCE_QUESTIONS } from "@/lib/attribution";
 
 const DOMAIN_ORDER: Domain[] = ["leadership", "rationality", "brilliance"];
@@ -254,6 +254,18 @@ export default function SettingsPage() {
             rows={6}
             className={inputClass + " font-mono"}
           />
+          <button
+            type="button"
+            onClick={() => update("attributionPromptTemplate", DEFAULT_ATTRIBUTION_PROMPT)}
+            className="mt-1 text-xs text-slate-500 underline hover:text-slate-700"
+          >
+            Reset to default
+          </button>
+          <p className="mt-1 text-xs text-slate-400">
+            Settings are saved per-browser — if this still shows old wording (e.g. &quot;Imagine you are the
+            boss of both employees...&quot;) from before that sentence moved into the fixed opening question
+            below, this button clears it back to the current shipped default.
+          </p>
         </Field>
         <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
           <p className="mb-2 text-xs font-medium text-slate-600">
