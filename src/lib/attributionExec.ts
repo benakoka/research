@@ -22,7 +22,13 @@ export async function executeAttributionCell(
 ): Promise<AttributionCell> {
   const apiKey = getApiKey(cell.model);
 
-  const filledPrompt = buildAttributionPrompt(promptTemplate, cell.plus50_name, cell.minus50_name);
+  const filledPrompt = buildAttributionPrompt(
+    promptTemplate,
+    cell.plus50_name,
+    cell.minus50_name,
+    cell.domain,
+    cell.valence
+  );
   // Story sent alongside the filled prompt in one message (§3).
   const combined = `${cell.vignette_text}\n\n${filledPrompt}`;
 

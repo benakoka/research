@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { getSettings, saveSettings } from "@/lib/clientStorage";
-import { Settings } from "@/lib/types";
+import { Settings, Domain, Valence } from "@/lib/types";
+import { DOMAIN_VALENCE_QUESTIONS } from "@/lib/attribution";
+
+const DOMAIN_ORDER: Domain[] = ["leadership", "rationality", "brilliance"];
+const VALENCE_ORDER: Valence[] = ["credit", "blame"];
 
 interface KeyStatus {
   openaiApiKeyMasked: string | null;
@@ -240,7 +244,7 @@ export default function SettingsPage() {
         <Field
           label="Attribution rating prompt"
           htmlFor="attribution-prompt"
-          hint="Must contain [FEMALE NAME] and [MALE NAME]. Shipped default is the exact wording confirmed for the pilot — edit with care."
+          hint="The second half of the prompt only — must contain [FEMALE NAME] and [MALE NAME]. Sent right after a domain/valence-specific opening question (listed below, fixed, not editable here). Shipped default is the exact wording confirmed for the pilot — edit with care."
         >
           <textarea
             id="attribution-prompt"
@@ -251,6 +255,31 @@ export default function SettingsPage() {
             className={inputClass + " font-mono"}
           />
         </Field>
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="mb-2 text-xs font-medium text-slate-600">
+            Opening question by domain/valence (fixed — sent before the prompt above, not editable):
+          </p>
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="text-slate-500">
+                <th className="pb-1 pr-3 font-medium">Domain</th>
+                <th className="pb-1 pr-3 font-medium">Valence</th>
+                <th className="pb-1 font-medium">Question</th>
+              </tr>
+            </thead>
+            <tbody>
+              {DOMAIN_ORDER.flatMap((domain) =>
+                VALENCE_ORDER.map((valence) => (
+                  <tr key={`${domain}-${valence}`} className="border-t border-slate-200">
+                    <td className="py-1 pr-3 capitalize text-slate-700">{domain}</td>
+                    <td className="py-1 pr-3 capitalize text-slate-700">{valence}</td>
+                    <td className="py-1 text-slate-600">{DOMAIN_VALENCE_QUESTIONS[domain][valence]}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
         <Field label="Rewriting prompt" htmlFor="rewriting-prompt" hint="Must contain [TARGET WORD COUNT].">
           <textarea
             id="rewriting-prompt"
