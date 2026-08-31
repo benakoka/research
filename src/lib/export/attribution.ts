@@ -109,7 +109,14 @@ const TEMPLATE_PATH = path.join(
   "attribution_wide_template.xlsx"
 );
 
-const DATA_SHEET_NAME = "Attribution Summarized Data";
+// The template file's data sheet is still literally named "Attribution
+// Summarized Data" on disk — found by that name, then immediately renamed
+// to FAVORABILITY_SHEET_NAME (see populateFavorabilitySheet) before any
+// other processing, so every other reference to "the data sheet" in this
+// file uses its final, user-facing name instead.
+const TEMPLATE_DATA_SHEET_NAME = "Attribution Summarized Data";
+const FAVORABILITY_SHEET_NAME = "Favorability Bias";
+const RESPONSIBILITY_SHEET_NAME = "Responsibility Bias";
 const ALL_COLS = [
   "A", "B", "C", "D", "E", "F", "G",
   "H", "I", "J", "K", "L", "M", "N", "O", "P",
@@ -171,21 +178,33 @@ function halve(a: number | null): number | null {
  * rows and by the two graph-feeder sheets, rather than recomputed each
  * place it's used.
  */
+// Every *Mean*/*Combined* field below comes in a signed (valence-corrected —
+// what the "Favorability Bias" tab shows) and raw (uncorrected — what
+// "Responsibility Bias" shows) version. Everything else (the A/B
+// intermediate diff/sum columns, and Prompt_Diff, computed in
+// populateDataSheetRow below) was never valence-corrected to begin with, so
+// it's identical on both tabs — only these six pairs actually differ.
 interface PairDerived {
   gptA1st: number | null; // GPT_A_1stAction_Pref
   gptB1st: number | null; // GPT_B_1stAction_Pref
   gptASum: number | null; // GPT_A_ActorA_Pref
   gptBSum: number | null; // GPT_B_ActorA_Pref
-  gptMean1st: number | null; // GPTMean_1stAction_Pref
-  gptMeanActorA: number | null; // GPTMean_ActorA_Pref
+  gptMean1st: number | null; // GPTMean_1stAction_Pref (signed)
+  gptMean1stRaw: number | null; // same, not corrected for valence
+  gptMeanActorA: number | null; // GPTMean_ActorA_Pref (signed)
+  gptMeanActorARaw: number | null; // same, not corrected for valence
   gemA1st: number | null; // Gem_A_1stAction_Pref
   gemB1st: number | null; // Gem_B_1stAction_Pref
   gemASum: number | null; // Gem_A_ActorA_Pref
   gemBSum: number | null; // Gem_B_Actor_APref
-  gemMean1st: number | null; // Gem_1stAction_Pref
-  gemMeanActorA: number | null; // Gem_ActorA_Pref
-  combinedMean1st: number | null; // Combined_mean_1stAction_Pref
-  combinedMeanActorA: number | null; // Combined_mean_ActorA_Pref
+  gemMean1st: number | null; // Gem_1stAction_Pref (signed)
+  gemMean1stRaw: number | null; // same, not corrected for valence
+  gemMeanActorA: number | null; // Gem_ActorA_Pref (signed)
+  gemMeanActorARaw: number | null; // same, not corrected for valence
+  combinedMean1st: number | null; // Combined_mean_1stAction_Pref (signed)
+  combinedMean1stRaw: number | null; // same, not corrected for valence
+  combinedMeanActorA: number | null; // Combined_mean_ActorA_Pref (signed)
+  combinedMeanActorARaw: number | null; // same, not corrected for valence
 }
 
 interface RowData {
@@ -259,7 +278,8 @@ function computeRowsAndPairs(cells: AttributionCell[]) {
     const gptASum = sum(rowA?.gptA, rowB?.gptA);
     const gptBSum = sum(rowA?.gptB, rowB?.gptB);
     const gptActorARaw = diff(gptASum, gptBSum);
-    const gptMeanActorA = gptActorARaw !== null ? (sign * gptActorARaw) / 4 : null;
+    const gptMeanActorARaw = gptActorARaw !== null ? gptActorARaw / 4 : null;
+    const gptMeanActorA = gptMeanActorARaw !== null ? sign * gptMeanActorARaw : null;
 
     const gemA1st = halve(diff(rowA?.gemA, rowB?.gemA));
     const gemB1stRaw = diff(rowA?.gemB, rowB?.gemB);
@@ -270,12 +290,17 @@ function computeRowsAndPairs(cells: AttributionCell[]) {
     const gemASum = sum(rowA?.gemA, rowB?.gemA);
     const gemBSum = sum(rowA?.gemB, rowB?.gemB);
     const gemActorARaw = diff(gemASum, gemBSum);
-    const gemMeanActorA = gemActorARaw !== null ? (sign * gemActorARaw) / 4 : null;
+    const gemMeanActorARaw = gemActorARaw !== null ? gemActorARaw / 4 : null;
+    const gemMeanActorA = gemMeanActorARaw !== null ? sign * gemMeanActorARaw : null;
 
     // Averages whichever of the two models is actually available, rather
     // than going blank just because one model errored on this pair.
     const combinedMean1st = average([gptMean1st, gemMean1st].filter((n): n is number => n !== null));
+    const combinedMean1stRaw = average([gptMean1stRaw, gemMean1stRaw].filter((n): n is number => n !== null));
     const combinedMeanActorA = average([gptMeanActorA, gemMeanActorA].filter((n): n is number => n !== null));
+    const combinedMeanActorARaw = average(
+      [gptMeanActorARaw, gemMeanActorARaw].filter((n): n is number => n !== null)
+    );
 
     pairDerivedByKey.set(key, {
       gptA1st,
@@ -283,15 +308,21 @@ function computeRowsAndPairs(cells: AttributionCell[]) {
       gptASum,
       gptBSum,
       gptMean1st,
+      gptMean1stRaw,
       gptMeanActorA,
+      gptMeanActorARaw,
       gemA1st,
       gemB1st,
       gemASum,
       gemBSum,
       gemMean1st,
+      gemMean1stRaw,
       gemMeanActorA,
+      gemMeanActorARaw,
       combinedMean1st,
+      combinedMean1stRaw,
       combinedMeanActorA,
+      combinedMeanActorARaw,
     });
   }
 
@@ -304,18 +335,22 @@ async function loadTemplateWorkbook(): Promise<ExcelJS.Workbook> {
   return workbook;
 }
 
-function populateDataSheet(
-  workbook: ExcelJS.Workbook,
-  rowsData: RowData[],
-  pairKey: (r: RowData) => string,
-  pairDerivedByKey: Map<string, PairDerived>
-) {
-  const sheet = workbook.getWorksheet(DATA_SHEET_NAME)!;
+interface DataSheetStyles {
+  dataRowStyle: Record<string, Partial<ExcelJS.Style>>;
+  meanRowStyle: Record<string, Partial<ExcelJS.Style>>;
+  dataRowHeight: number;
+  meanRowHeight: number;
+  cfRuleDefs: ExcelJS.ConditionalFormattingRule[][];
+}
 
-  // Capture every style this template actually uses — from its own sample
-  // data row and its own Column Mean row — before any of it gets removed.
-  // Rows 1-2 (the merged group headers + column headers) are never touched
-  // at all, so whatever the template does there just carries through as-is.
+/**
+ * Captures every style the template's data sheet actually uses — from its
+ * own sample data row and its own Column Mean row — before any of it gets
+ * touched. Read once, reused for both the Favorability Bias sheet (built in
+ * place, cloning the template) and the Responsibility Bias sheet (a fresh
+ * sheet with no styles of its own yet).
+ */
+function captureDataSheetStyles(sheet: ExcelJS.Worksheet): DataSheetStyles {
   const dataRowStyle: Record<string, Partial<ExcelJS.Style>> = {};
   const meanRowStyle: Record<string, Partial<ExcelJS.Style>> = {};
   for (const col of ALL_COLS) {
@@ -326,26 +361,53 @@ function populateDataSheet(
   const meanRowHeight = sheet.getRow(TEMPLATE_MEAN_ROW).height;
   // ExcelJS stores existing conditional formatting on a `conditionalFormattings`
   // array, but doesn't expose a public getter/type for it (only
-  // addConditionalFormatting to add more) — read/cleared here via a narrow
-  // escape hatch rather than the untyped `any` the rest of the file avoids.
+  // addConditionalFormatting to add more) — read here via a narrow escape
+  // hatch rather than the untyped `any` the rest of the file avoids.
   const sheetInternal = sheet as unknown as {
     conditionalFormattings: { rules: ExcelJS.ConditionalFormattingRule[] }[];
   };
   const cfRuleDefs = sheetInternal.conditionalFormattings.map((cf) => cf.rules);
+  return { dataRowStyle, meanRowStyle, dataRowHeight, meanRowHeight, cfRuleDefs };
+}
 
-  // Remove the sample rows and the old Column Mean row (and the
-  // conditional formatting pointed at their row range) — column widths,
-  // freeze panes, and the row 1-2 headers live outside this row range and
-  // are untouched by spliceRows.
+/**
+ * Removes the template's sample rows and old Column Mean row (and the
+ * conditional formatting pointed at their row range) from a sheet that
+ * still has them — i.e. only the Favorability Bias sheet, which is the
+ * template's own data sheet cloned in place. Column widths, freeze panes,
+ * and the row 1-2 headers live outside this row range and are untouched.
+ */
+function clearTemplateSampleRows(sheet: ExcelJS.Worksheet) {
+  const sheetInternal = sheet as unknown as {
+    conditionalFormattings: { rules: ExcelJS.ConditionalFormattingRule[] }[];
+  };
   sheet.spliceRows(TEMPLATE_FIRST_DATA_ROW, sheet.rowCount - TEMPLATE_FIRST_DATA_ROW + 1);
   sheetInternal.conditionalFormattings = [];
+}
 
+/**
+ * Writes the actual data rows + Column Mean row into a sheet that already
+ * has correct row 1-2 headers and column widths (either the template's own,
+ * for Favorability Bias, or copied from it, for Responsibility Bias).
+ * `useValenceSign` picks which of each Mean/Combined pair PairDerived
+ * carries — signed (valence-corrected — Favorability Bias) or raw
+ * (Responsibility Bias) — everything else is identical between the two
+ * sheets, since only those six columns were ever valence-corrected.
+ */
+function writeDataRows(
+  sheet: ExcelJS.Worksheet,
+  rowsData: RowData[],
+  pairKey: (r: RowData) => string,
+  pairDerivedByKey: Map<string, PairDerived>,
+  styles: DataSheetStyles,
+  useValenceSign: boolean
+) {
   for (let i = 0; i < rowsData.length; i++) {
     const row = rowsData[i];
     const d = pairDerivedByKey.get(pairKey(row))!;
     const excelRowNum = TEMPLATE_FIRST_DATA_ROW + i;
     const excelRow = sheet.getRow(excelRowNum);
-    excelRow.height = dataRowHeight;
+    excelRow.height = styles.dataRowHeight;
 
     const values: Partial<Record<(typeof ALL_COLS)[number], unknown>> = {
       A: row.vignetteId,
@@ -361,26 +423,26 @@ function populateDataSheet(
       K: row.gptB,
       L: d.gptB1st,
       M: d.gptBSum,
-      N: d.gptMean1st,
-      O: d.gptMeanActorA,
-      P: halve(sum(row.gptA, row.gptB)), // GPT_Prompt_Diff, halved per the professor's request
+      N: useValenceSign ? d.gptMean1st : d.gptMean1stRaw,
+      O: useValenceSign ? d.gptMeanActorA : d.gptMeanActorARaw,
+      P: halve(sum(row.gptA, row.gptB)), // GPT_Prompt_Diff — never valence-corrected, same on both sheets
       Q: row.gemA,
       R: d.gemA1st,
       S: d.gemASum,
       T: row.gemB,
       U: d.gemB1st,
       V: d.gemBSum,
-      W: d.gemMean1st,
-      X: d.gemMeanActorA,
-      Y: halve(sum(row.gemA, row.gemB)), // Gem_Prompt_Diff, halved per the professor's request
-      Z: d.combinedMean1st,
-      AA: d.combinedMeanActorA,
+      W: useValenceSign ? d.gemMean1st : d.gemMean1stRaw,
+      X: useValenceSign ? d.gemMeanActorA : d.gemMeanActorARaw,
+      Y: halve(sum(row.gemA, row.gemB)), // Gem_Prompt_Diff — never valence-corrected, same on both sheets
+      Z: useValenceSign ? d.combinedMean1st : d.combinedMean1stRaw,
+      AA: useValenceSign ? d.combinedMeanActorA : d.combinedMeanActorARaw,
     };
 
     for (const col of ALL_COLS) {
       const cell = excelRow.getCell(col);
       cell.value = (values[col] ?? null) as ExcelJS.CellValue;
-      cell.style = cloneStyle(dataRowStyle[col]);
+      cell.style = cloneStyle(styles.dataRowStyle[col]);
     }
   }
 
@@ -395,20 +457,92 @@ function populateDataSheet(
         return `${c1}${TEMPLATE_FIRST_DATA_ROW}:${c2}${lastDataRow}`;
       })
       .join(" ");
-    sheet.addConditionalFormatting({ ref: sqref, rules: cfRuleDefs[i] });
+    sheet.addConditionalFormatting({ ref: sqref, rules: styles.cfRuleDefs[i] });
   }
 
   const meanRow = sheet.getRow(lastDataRow + 1);
-  meanRow.height = meanRowHeight;
+  meanRow.height = styles.meanRowHeight;
   for (const col of ALL_COLS) {
     const cell = meanRow.getCell(col);
-    cell.style = cloneStyle(meanRowStyle[col]);
+    cell.style = cloneStyle(styles.meanRowStyle[col]);
     if (col === "A") {
       cell.value = "Column Mean:";
     } else if (NUMERIC_COLS.has(col)) {
       cell.value = { formula: `AVERAGE(${col}${TEMPLATE_FIRST_DATA_ROW}:${col}${lastDataRow})` };
     }
   }
+}
+
+/**
+ * The template's own data sheet, renamed and populated in place with the
+ * valence-corrected ("favors Actor A vs. favors Actor B", comparable across
+ * credit and blame) version of every Mean/Combined column. Returns the
+ * sheet and the styles captured from it, so Responsibility Bias (below)
+ * can reuse both without re-reading a second, separately-loaded template.
+ */
+function populateFavorabilitySheet(
+  workbook: ExcelJS.Workbook,
+  rowsData: RowData[],
+  pairKey: (r: RowData) => string,
+  pairDerivedByKey: Map<string, PairDerived>
+): { sheet: ExcelJS.Worksheet; styles: DataSheetStyles } {
+  const sheet = workbook.getWorksheet(TEMPLATE_DATA_SHEET_NAME)!;
+  sheet.name = FAVORABILITY_SHEET_NAME;
+
+  const styles = captureDataSheetStyles(sheet);
+  clearTemplateSampleRows(sheet);
+  writeDataRows(sheet, rowsData, pairKey, pairDerivedByKey, styles, true);
+
+  return { sheet, styles };
+}
+
+/**
+ * A sibling of Favorability Bias with the exact same structure (rows 1-2,
+ * column widths, freeze panes, all copied cell-by-cell from the already-
+ * built Favorability sheet — copying a 2-row header is small and reliable;
+ * ExcelJS has no supported "clone this whole worksheet" API, and an attempt
+ * at one via its internal `.model` didn't survive a round-trip for merges),
+ * but every Mean/Combined column left uncorrected for valence — so it shows
+ * raw responsibility-attribution, not "who does the model favor."
+ */
+function addResponsibilityBiasSheet(
+  workbook: ExcelJS.Workbook,
+  favorabilitySheet: ExcelJS.Worksheet,
+  styles: DataSheetStyles,
+  rowsData: RowData[],
+  pairKey: (r: RowData) => string,
+  pairDerivedByKey: Map<string, PairDerived>
+) {
+  const sheet = workbook.addWorksheet(RESPONSIBILITY_SHEET_NAME);
+  // addWorksheet always appends at the end (Graphs by Model, Combined
+  // Graphs, Raw Data would all land ahead of it) — "next to" Favorability
+  // Bias means immediately after it, so re-slot this sheet's tab-order
+  // position directly. ExcelJS sorts tabs by this `orderNo` property
+  // (undocumented in its public types, but it's a plain assignable number,
+  // not deep internal state) rather than by insertion order.
+  (sheet as unknown as { orderNo: number }).orderNo =
+    (favorabilitySheet as unknown as { orderNo: number }).orderNo + 0.5;
+
+  for (const rowNum of [1, 2]) {
+    const sourceRow = favorabilitySheet.getRow(rowNum);
+    const targetRow = sheet.getRow(rowNum);
+    targetRow.height = sourceRow.height;
+    for (const col of ALL_COLS) {
+      const sourceCell = favorabilitySheet.getCell(`${col}${rowNum}`);
+      const targetCell = sheet.getCell(`${col}${rowNum}`);
+      targetCell.value = sourceCell.value;
+      targetCell.style = cloneStyle(sourceCell.style);
+    }
+  }
+  for (const merge of ["H1:O1", "Q1:X1", "Z1:AA1"]) {
+    sheet.mergeCells(merge);
+  }
+  for (const col of ALL_COLS) {
+    sheet.getColumn(col).width = favorabilitySheet.getColumn(col).width;
+  }
+  sheet.views = favorabilitySheet.views;
+
+  writeDataRows(sheet, rowsData, pairKey, pairDerivedByKey, styles, false);
 }
 
 // The reference file's two "Graphs by Model" / "Combined Graphs" tabs pull
@@ -553,12 +687,22 @@ function addPlainEnglishColumn(workbook: ExcelJS.Workbook) {
  * across reps rather than silently dropping data (§3). Also carries a
  * "Raw Data" tab (every individual model call, long format) — this is now
  * the one export file; there's no separate long-CSV download anymore.
+ *
+ * The summarized data ships as two sheets, identical except for the six
+ * Mean/Combined columns (1stAction and ActorA, per model and combined):
+ * "Favorability Bias" applies the credit/blame sign correction (does the
+ * model favor Actor A vs. Actor B, on one scale comparable across both
+ * valences); "Responsibility Bias" leaves those same six columns
+ * uncorrected (raw attribution, valence-agnostic). Every other column —
+ * raw ratings, the A/B intermediate diff/sum columns, Prompt_Diff — was
+ * never valence-corrected in the first place, so it's identical on both.
  */
 export async function buildAttributionWideWorkbook(cells: AttributionCell[]): Promise<ExcelJS.Workbook> {
   const { rowsData, pairKey, pairDerivedByKey } = computeRowsAndPairs(cells);
 
   const workbook = await loadTemplateWorkbook();
-  populateDataSheet(workbook, rowsData, pairKey, pairDerivedByKey);
+  const { sheet: favorabilitySheet, styles } = populateFavorabilitySheet(workbook, rowsData, pairKey, pairDerivedByKey);
+  addResponsibilityBiasSheet(workbook, favorabilitySheet, styles, rowsData, pairKey, pairDerivedByKey);
   populateGraphFeederSheets(workbook, rowsData, pairKey, pairDerivedByKey);
   addPlainEnglishColumn(workbook);
   // Last tab — supplementary to the summarized/graph sheets above, not the
