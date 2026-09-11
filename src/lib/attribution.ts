@@ -78,9 +78,22 @@ export function buildAttributionPrompt(
 
 /**
  * Parses the numeric rating out of a model response. Models were instructed
- * to "Respond with only the number" but may still add commentary — this
- * extracts the first signed number rather than silently failing, while still
- * surfacing a parse error when nothing numeric is found (§3).
+ * to "Respond with only the number" but may still add a little commentary
+ * around it ("The rating is 22.") — tolerated, as long as there's exactly
+ * one number in the whole response to extract.
+ *
+ * Anything with more than one number is treated as unparseable, same as
+ * zero — not extracted via "grab the first one found". An earlier version
+ * did exactly that, and it was a real bug in practice: a model that ignores
+ * "only the number" badly enough to write multi-paragraph reasoning (numbered
+ * arguments, bold headers, etc.) usually has its first digit be a list
+ * marker or a number mentioned in passing, not the actual rating — so
+ * "first number" was silently recording that stray digit as if it were the
+ * real answer instead of surfacing the parse failure it actually was. Since
+ * a response like that is exactly the kind of non-numeric-answer case
+ * lib/attributionExec.ts's retry loop exists to catch, requiring the number
+ * to be unambiguous (there's only one) routes it there instead of trusting
+ * a guess.
  */
 export function parseRating(rawText: string): { rating: number | null; parseError: string | null } {
   const trimmed = rawText.trim();
@@ -88,11 +101,17 @@ export function parseRating(rawText: string): { rating: number | null; parseErro
   if (Number.isFinite(direct) && trimmed !== "") {
     return { rating: direct, parseError: null };
   }
-  const match = trimmed.match(/-?\d+(\.\d+)?/);
-  if (match) {
-    return { rating: Number(match[0]), parseError: null };
+  const matches = trimmed.match(/-?\d+(\.\d+)?/g);
+  if (!matches) {
+    return { rating: null, parseError: "No numeric rating found in response." };
   }
-  return { rating: null, parseError: "No numeric rating found in response." };
+  if (matches.length > 1) {
+    return {
+      rating: null,
+      parseError: `Response contained ${matches.length} numbers, not a single unambiguous rating.`,
+    };
+  }
+  return { rating: Number(matches[0]), parseError: null };
 }
 
 export function cellId(vignetteId: string, direction: ScaleDirection, model: ModelProvider, rep: number): string {
