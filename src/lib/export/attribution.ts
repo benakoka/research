@@ -88,10 +88,11 @@ function addRawDataSheet(workbook: ExcelJS.Workbook, cells: AttributionCell[]) {
 }
 
 // The wide export is built by cloning the user-supplied reference workbook
-// (Revised_Sheet_Format.xlsx, "Attribution Summarized Data" / "Legend" /
-// "Graphs by Model" / "Combined Graphs") rather than reconstructing its
-// formatting from scratch — an earlier from-scratch attempt at this quietly
-// diverged from the reference on borders, the Column Mean row's fill, the
+// (Revised_Sheet_Format.xlsx, "Attribution Summarized Data" / "Legend" —
+// its "Graphs by Model" / "Combined Graphs" tabs are dropped entirely, see
+// buildAttributionWideWorkbook) rather than reconstructing its formatting
+// from scratch — an earlier from-scratch attempt at this quietly diverged
+// from the reference on borders, the Column Mean row's fill, the
 // GPT_ARating column's bold data cells, and the exact (overlapping) column
 // ranges its conditional-formatting rules cover. Cloning every style object
 // directly off the real file makes "identical formatting" a copy, not
@@ -100,8 +101,7 @@ function addRawDataSheet(workbook: ExcelJS.Workbook, cells: AttributionCell[]) {
 // through openpyxl once before being checked in, to flatten Excel's "shared
 // formula" optimization, which otherwise makes ExcelJS throw when the
 // sample rows are spliced out — the flattened file evaluates to the exact
-// same values, just without that internal optimization — and its embedded
-// charts were dropped (unused — see the Graphs sheets' handling below).
+// same values, just without that internal optimization.
 const TEMPLATE_PATH = path.join(
   process.cwd(),
   "public",
@@ -175,8 +175,7 @@ function halve(a: number | null): number | null {
  * (or plus) B row" calculation, so the same value is written to both rows
  * of a pair, never something computed relative to "whichever row this is"
  * (see the Legend sheet). Computed once per pair, then looked up by both
- * rows and by the two graph-feeder sheets, rather than recomputed each
- * place it's used.
+ * rows, rather than recomputed each place it's used.
  */
 // Every *Mean*/*Combined* field below comes in a signed (valence-corrected —
 // what the "Favorability Bias" tab shows) and raw (uncorrected — what
@@ -216,7 +215,7 @@ interface RowData {
   gemB: number | null;
 }
 
-/** Shared by the main data sheet and the two graph-feeder sheets. */
+/** Feeds both the Favorability Bias and Responsibility Bias sheets. */
 function computeRowsAndPairs(cells: AttributionCell[]) {
   const byVignette = new Map<string, AttributionCell[]>();
   for (const c of cells) {
@@ -500,6 +499,13 @@ function populateFavorabilitySheet(
   const styles = captureDataSheetStyles(sheet);
   clearTemplateSampleRows(sheet);
   writeDataRows(sheet, rowsData, pairKey, pairDerivedByKey, styles, true);
+  // The template only freezes column A (xSplit: 1, ySplit: 0) — rows 1-2
+  // (the merged group headers + column headers) scroll away with the data.
+  // Freeze both: column A and rows 1-2 stay put while scrolling either
+  // direction. addResponsibilityBiasSheet copies this same views value.
+  sheet.views = [
+    { state: "frozen", xSplit: 1, ySplit: 2, topLeftCell: "B3", activeCell: "B3" },
+  ];
 
   return { sheet, styles };
 }
@@ -553,86 +559,13 @@ function addResponsibilityBiasSheet(
   writeDataRows(sheet, rowsData, pairKey, pairDerivedByKey, styles, false);
 }
 
-// The reference file's two "Graphs by Model" / "Combined Graphs" tabs pull
-// live from formulas across the data sheet and carry real embedded bar
-// charts; ExcelJS can't write native chart objects (confirmed with the user
-// as the accepted tradeoff — see the Legend appendix below), so these are
+// The reference file's two "Graphs by Model" / "Combined Graphs" tabs pulled
+// live from formulas across the data sheet and carried real embedded bar
+// charts; ExcelJS can't write native chart objects, so they'd previously
 // shipped as the same data tables those charts were built from, values
-// instead of formulas (consistent with the main data sheet), same styling.
-const GENDER_CUES_CAVEAT =
-  "(This dataset has no gender cues, so any nonzero value here reflects labeling/role bias, not gender bias.)";
-const GENDER_CUES_REPLACEMENT =
-  "(Actor A = the female-named actor; Actor B = the male-named actor, so a nonzero value here reflects a genuine gender-favor signal, not just role/order bias.)";
-
-function fixGenderCuesCaveat(sheet: ExcelJS.Worksheet) {
-  const cell = sheet.getCell("A1");
-  if (typeof cell.value === "string" && cell.value.includes(GENDER_CUES_CAVEAT)) {
-    cell.value = cell.value.replace(GENDER_CUES_CAVEAT, GENDER_CUES_REPLACEMENT);
-  }
-}
-
-function populateGraphFeederSheet(sheet: ExcelJS.Worksheet, rows: unknown[][], columns: string[]) {
-  const firstDataRow = 4; // row 1 = description, row 2 = blank, row 3 = headers
-  const dataRowStyle: Record<string, Partial<ExcelJS.Style>> = {};
-  for (const col of columns) dataRowStyle[col] = cloneStyle(sheet.getCell(`${col}${firstDataRow}`).style);
-  const dataRowHeight = sheet.getRow(firstDataRow).height;
-
-  // See the matching comment in clearTemplateSampleRows — sheet.rowCount
-  // reflects the template's declared dimension range, not real content;
-  // sheet.dimensions.bottom is the actual last populated row.
-  const lastRealRow = sheet.dimensions.bottom;
-  if (lastRealRow >= firstDataRow) {
-    sheet.spliceRows(firstDataRow, lastRealRow - firstDataRow + 1);
-  }
-
-  rows.forEach((values, i) => {
-    const row = sheet.getRow(firstDataRow + i);
-    row.height = dataRowHeight;
-    columns.forEach((col, colIdx) => {
-      const cell = row.getCell(col);
-      cell.value = (values[colIdx] as ExcelJS.CellValue) ?? null;
-      cell.style = cloneStyle(dataRowStyle[col]);
-    });
-  });
-}
-
-function populateGraphFeederSheets(
-  workbook: ExcelJS.Workbook,
-  rowsData: RowData[],
-  pairKey: (r: RowData) => string,
-  pairDerivedByKey: Map<string, PairDerived>
-) {
-  const byPair = new Map<string, RowData[]>();
-  for (const r of rowsData) {
-    const key = pairKey(r);
-    if (!byPair.has(key)) byPair.set(key, []);
-    byPair.get(key)!.push(r);
-  }
-
-  const scenarioLabel = (r: RowData) => r.vignetteId.replace(/-[AB]$/, "");
-
-  const byModelRows: unknown[][] = [];
-  const combinedRows: unknown[][] = [];
-  for (const [key, group] of byPair) {
-    const rowA = group.find((r) => r.first.order_variant === "A");
-    const rowB = group.find((r) => r.first.order_variant === "B");
-    const rep = rowA ?? rowB;
-    if (!rep) continue;
-    const d = pairDerivedByKey.get(key);
-    if (!d) continue;
-
-    const scenario = scenarioLabel(rep);
-    byModelRows.push([scenario, rep.first.domain, rep.first.valence, d.gptMean1st, d.gemMean1st, d.gptMeanActorA, d.gemMeanActorA]);
-    combinedRows.push([scenario, rep.first.domain, rep.first.valence, d.combinedMean1st, d.combinedMeanActorA]);
-  }
-
-  const byModelSheet = workbook.getWorksheet("Graphs by Model")!;
-  const combinedSheet = workbook.getWorksheet("Combined Graphs")!;
-  fixGenderCuesCaveat(byModelSheet);
-  fixGenderCuesCaveat(combinedSheet);
-  populateGraphFeederSheet(byModelSheet, byModelRows, ["A", "B", "C", "D", "E", "F", "G"]);
-  populateGraphFeederSheet(combinedSheet, combinedRows, ["A", "B", "C", "D", "E"]);
-}
+// instead of formulas. Dropped entirely at the user's request — see
+// buildAttributionWideWorkbook, which removes both sheets outright rather
+// than populating them.
 
 // Plain-English translation of the reference file's own 14 Legend rows
 // (rows 2-14 — row 1 is the header) — same order, added as a new column
@@ -708,17 +641,22 @@ function addPlainEnglishColumn(workbook: ExcelJS.Workbook) {
  * uncorrected (raw attribution, valence-agnostic). Every other column —
  * raw ratings, the A/B intermediate diff/sum columns, Prompt_Diff — was
  * never valence-corrected in the first place, so it's identical on both.
+ * Both freeze column A and rows 1-2 (see populateFavorabilitySheet).
+ *
+ * The reference workbook's "Graphs by Model" / "Combined Graphs" tabs are
+ * removed outright, not populated — dropped at the user's request.
  */
 export async function buildAttributionWideWorkbook(cells: AttributionCell[]): Promise<ExcelJS.Workbook> {
   const { rowsData, pairKey, pairDerivedByKey } = computeRowsAndPairs(cells);
 
   const workbook = await loadTemplateWorkbook();
+  workbook.removeWorksheet("Graphs by Model");
+  workbook.removeWorksheet("Combined Graphs");
   const { sheet: favorabilitySheet, styles } = populateFavorabilitySheet(workbook, rowsData, pairKey, pairDerivedByKey);
   addResponsibilityBiasSheet(workbook, favorabilitySheet, styles, rowsData, pairKey, pairDerivedByKey);
-  populateGraphFeederSheets(workbook, rowsData, pairKey, pairDerivedByKey);
   addPlainEnglishColumn(workbook);
-  // Last tab — supplementary to the summarized/graph sheets above, not the
-  // first thing someone opening the file should see.
+  // Last tab — supplementary to the summarized sheets above, not the first
+  // thing someone opening the file should see.
   addRawDataSheet(workbook, cells);
 
   return workbook;

@@ -46,7 +46,7 @@ export const DOMAIN_VALENCE_QUESTIONS: Record<Domain, Record<Valence, string>> =
  * this many times before giving up and marking the cell an error the user
  * can see (attribution/page.tsx's error column).
  */
-export const MAX_RATING_PARSE_ATTEMPTS = 5;
+export const MAX_RATING_PARSE_ATTEMPTS = 10;
 
 /** Which name fills the [FEMALE NAME]/[MALE NAME] slots for a given scale direction (§3). */
 function slotNames(row: VignetteRow, direction: ScaleDirection) {
