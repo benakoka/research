@@ -38,12 +38,15 @@ export const DOMAIN_VALENCE_QUESTIONS: Record<Domain, Record<Valence, string>> =
 
 /**
  * Models were told to "Respond with only the number" but occasionally answer
- * with no parseable number at all (declines, commentary with no digits,
- * etc.). Rather than surfacing that as a cell needing a manual retry click,
- * lib/attributionExec.ts retries automatically — same call, fresh attempt —
- * up to this many times before giving up and marking the cell an error.
+ * with no parseable number at all — most commonly Gemini declining with a
+ * paragraph about not having bias, no digits in it anywhere. Rather than
+ * surfacing that as a cell needing a manual retry click, or worse, keeping
+ * the blurb as if it were real data, lib/attributionExec.ts discards it
+ * outright and retries automatically — same call, fresh attempt — up to
+ * this many times before giving up and marking the cell an error the user
+ * can see (attribution/page.tsx's error column).
  */
-export const MAX_RATING_PARSE_ATTEMPTS = 10;
+export const MAX_RATING_PARSE_ATTEMPTS = 5;
 
 /** Which name fills the [FEMALE NAME]/[MALE NAME] slots for a given scale direction (§3). */
 function slotNames(row: VignetteRow, direction: ScaleDirection) {
