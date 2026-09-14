@@ -30,9 +30,11 @@ const BATCH_SIZE = 4;
 // errors) that the failures seen so far are Gemini genuinely never
 // producing a clean number in MAX_RATING_PARSE_ATTEMPTS tries — not
 // rate-limit (429) responses — so there's no evidence yet that raising this
-// trips provider limits. Raised from 3 to 5 on that basis; dial it back if
-// a run does start showing new rate-limit errors.
-const WORKER_COUNT = 5;
+// trips provider limits. Raised 3 -> 5 -> 8 on that basis; dial it back if
+// a run does start showing new rate-limit errors (a burst of 429s in the
+// error column is the tell — that's the provider's ceiling, not this
+// app's, and no batching/concurrency change here gets around it).
+const WORKER_COUNT = 8;
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);

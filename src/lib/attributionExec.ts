@@ -8,29 +8,13 @@ import { callModel, ModelCallError } from "./models";
 import { getApiKey } from "./apiKeys";
 import { buildAttributionPrompt, parseRating, MAX_RATING_PARSE_ATTEMPTS } from "./attribution";
 
-// Appended to the prompt starting on the 2nd attempt only — the 1st attempt
-// is always the exact, unmodified prompt (matches the documented
-// methodology). A model that ignores "respond with only the number" often
-// isn't refusing outright, it's writing out actual deliberation (weighed
-// arguments, a concluding sentence) — repeating the identical prompt
-// verbatim doesn't push back on that pattern at all, it just asks the same
-// question again and tends to get the same kind of verbose answer again.
-// This is a direct, escalating nudge specifically calling out the failure,
-// which costs nothing on a normal cell (attempt 1 almost always succeeds)
-// but gives a stuck cell a real chance to break out of it instead of
-// burning all MAX_RATING_PARSE_ATTEMPTS tries on identical requests.
-const RETRY_REMINDER =
-  "\n\n(Your previous response did not contain a single, unambiguous numeric rating. " +
-  "Respond with ONLY the number on the scale above — no words, no explanation, no list of arguments.)";
-
 /**
  * Executes one cell: builds the prompt, calls the model, parses the rating.
- * If the response has no parseable number in it, retries — not a manual
- * click, automatic — up to MAX_RATING_PARSE_ATTEMPTS times, stopping the
- * moment a number comes back, appending RETRY_REMINDER from the 2nd attempt
- * on. Only once every attempt comes back non-numeric does this surface as
- * an error, so a stray non-numeric response no longer needs a manual
- * "Retry" click to clear.
+ * If the response has no parseable number in it, retries the exact same
+ * call — not a manual click, automatic — up to MAX_RATING_PARSE_ATTEMPTS
+ * times, stopping the moment a number comes back. Only once every attempt
+ * comes back non-numeric does this surface as an error, so a stray
+ * non-numeric response no longer needs a manual "Retry" click to clear.
  */
 export async function executeAttributionCell(
   promptTemplate: string,
@@ -53,8 +37,7 @@ export async function executeAttributionCell(
 
   try {
     for (let attempt = 1; attempt <= MAX_RATING_PARSE_ATTEMPTS; attempt++) {
-      const prompt = attempt === 1 ? combined : combined + RETRY_REMINDER;
-      const result = await callModel(cell.model, apiKey, cell.model_snapshot, prompt);
+      const result = await callModel(cell.model, apiKey, cell.model_snapshot, combined);
       const { rating, parseError } = parseRating(result.text);
       if (rating !== null) {
         return {
