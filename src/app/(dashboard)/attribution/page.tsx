@@ -26,12 +26,13 @@ const BATCH_SIZE = 4;
 // such requests now run concurrently instead of one at a time, which is
 // where most of a large run's wall-clock time actually goes — a run isn't
 // bound by any single call's latency, it's bound by how many calls have to
-// happen serially before every cell's done. 3 was picked as a first step:
-// meaningfully faster without pushing so much simultaneous load at GPT/
-// Gemini that rate limits (429s) start showing up instead. Raise it if a
-// real run comes back clean with no new rate-limit errors; lower it if one
-// does.
-const WORKER_COUNT = 3;
+// happen serially before every cell's done. Confirmed (a real run's actual
+// errors) that the failures seen so far are Gemini genuinely never
+// producing a clean number in MAX_RATING_PARSE_ATTEMPTS tries — not
+// rate-limit (429) responses — so there's no evidence yet that raising this
+// trips provider limits. Raised from 3 to 5 on that basis; dial it back if
+// a run does start showing new rate-limit errors.
+const WORKER_COUNT = 5;
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -131,8 +132,19 @@ export default function AttributionPage() {
     async function worker() {
       while (true) {
         if (cancelRequestedRef.current || fatalError) return;
-        const claim = working.cells.filter((c) => c.status === "pending").slice(0, BATCH_SIZE);
-        if (claim.length === 0) return;
+        const pending = working.cells.filter((c) => c.status === "pending");
+        if (pending.length === 0) return;
+        // Same model only, not just "the next BATCH_SIZE pending cells" —
+        // the /process route's Promise.all waits for the slowest cell in
+        // the batch, and GPT/Gemini have very different latency profiles
+        // (Gemini can run close to its 45s timeout, or need several
+        // automatic retries for a non-numeric response). A batch mixing
+        // both means fast GPT cells sit idle waiting on a slow Gemini one
+        // for no reason; keeping each batch single-model means a slow
+        // cell only ever costs its own worker, never a different model's
+        // otherwise-fast cells sharing its batch.
+        const targetModel = pending[0].model;
+        const claim = pending.filter((c) => c.model === targetModel).slice(0, BATCH_SIZE);
 
         const claimIds = new Set(claim.map((c) => c.id));
         working = {
