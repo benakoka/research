@@ -58,7 +58,7 @@ export default function RewritingPage() {
   const [run, setRun] = useState<RewritingRun | null>(null);
   const [starting, setStarting] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [exporting, setExporting] = useState<"long" | "wide" | null>(null);
+  const [exporting, setExporting] = useState<"long" | "wide" | "vignettes" | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -329,7 +329,7 @@ export default function RewritingPage() {
     }
   }
 
-  async function exportRun(format: "long" | "wide") {
+  async function exportRun(format: "long" | "wide" | "vignettes") {
     if (!run) return;
     setExporting(format);
     setError(null);
@@ -464,6 +464,14 @@ export default function RewritingPage() {
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 {exporting === "wide" ? "Exporting…" : "Export wide XLSX"}
+              </button>
+              <button
+                onClick={() => exportRun("vignettes")}
+                disabled={exporting !== null}
+                title="Every finished generation (seed + both models' rewrites) as a Vignettes sheet, ready to re-upload into either module."
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {exporting === "vignettes" ? "Exporting…" : "Export as vignette upload"}
               </button>
             </div>
           </section>

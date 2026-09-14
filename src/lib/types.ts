@@ -167,6 +167,19 @@ export interface RewritingChain {
   valence: Valence;
   scenario_number: number;
   order_variant: OrderVariant;
+  // Carried straight from the source VignetteRow at chain-build time, same as
+  // domain/valence/etc. above. The rewriting prompt itself never needs these
+  // (no [FEMALE NAME]/[MALE NAME] slotting like Attribution has — a model
+  // rewriting a story is just told to keep both characters' names as-is),
+  // but the "export as vignettes" format (lib/export/rewriting.ts) needs
+  // them to reconstruct a valid re-uploadable Vignettes row for each
+  // generation, and this run's own vignetteSet (browser state, not
+  // persisted) doesn't survive a page reload — so this is the only place
+  // that data still exists once a run has resumed from localStorage.
+  actor_first_name: string;
+  actor_second_name: string;
+  female_name: string;
+  male_name: string;
   model: ModelProvider;
   model_snapshot: string;
   wordCountTargets: [number, number, number, number, number];
