@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import VignetteUploader from "../VignetteUploader";
 import { buildAttributionCells } from "@/lib/attribution";
 import {
@@ -55,6 +56,17 @@ export default function AttributionPage() {
   const [processing, setProcessing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [retrying, setRetrying] = useState<string | null>(null);
+  // The open error popover, if any (see the error <td> below) — id plus the
+  // clicked button's own on-screen position, captured at click time.
+  // Rendered via a portal (see errorPopover's JSX) rather than an
+  // absolutely-positioned child of the table cell: the results table
+  // scrolls in its own overflow-auto box, and a popover positioned relative
+  // to a cell near the top of that box would get clipped trying to render
+  // above it. A portal to document.body plus a fixed position from the
+  // real click coordinates always renders in full, regardless of scroll
+  // position.
+  const [errorPopover, setErrorPopover] = useState<{ id: string; top: number; left: number } | null>(null);
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Separate from `error` (which is transient, about the last batch/export
   // action) — this one persists across renders once set, because it means
@@ -216,6 +228,34 @@ export default function AttributionPage() {
     cancelRequestedRef.current = true;
     for (const c of abortControllersRef.current) c.abort();
   }
+
+  // Close the error popover on any click outside it, or on scroll — since
+  // its position is captured once at click time (not re-measured live), a
+  // scroll of the results table (or the page) would leave it pointing at
+  // the wrong spot if it stayed open. Only attached while one is actually
+  // open.
+  useEffect(() => {
+    if (errorPopover === null) return;
+    function handleClick(e: MouseEvent) {
+      if (!(e.target instanceof Element) || !e.target.closest("[data-error-popover]")) {
+        setErrorPopover(null);
+      }
+    }
+    function handleScroll() {
+      setErrorPopover(null);
+    }
+    document.addEventListener("mousedown", handleClick);
+    // Both: the results table's own overflow-auto box (its scroll doesn't
+    // reliably bubble to window across browsers) and the page itself.
+    window.addEventListener("scroll", handleScroll, true);
+    const scrollEl = tableScrollRef.current;
+    scrollEl?.addEventListener("scroll", handleScroll);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      window.removeEventListener("scroll", handleScroll, true);
+      scrollEl?.removeEventListener("scroll", handleScroll);
+    };
+  }, [errorPopover]);
 
   useEffect(() => {
     (async () => {
@@ -433,7 +473,7 @@ export default function AttributionPage() {
             </div>
           </section>
 
-          <div className="max-h-[32rem] overflow-auto rounded-xl border border-slate-200 bg-white">
+          <div ref={tableScrollRef} className="max-h-[32rem] overflow-auto rounded-xl border border-slate-200 bg-white">
             <table className="w-full text-left text-xs">
               <thead className="sticky top-0 bg-slate-100">
                 <tr>
@@ -470,8 +510,23 @@ export default function AttributionPage() {
                     <td className="px-2 py-1">{c.rating ?? "—"}</td>
                     <td className="px-2 py-1">{c.plus50_name}</td>
                     <td className="px-2 py-1">{c.minus50_name}</td>
-                    <td className="max-w-xs truncate px-2 py-1 text-red-600" title={c.error ?? c.parse_error ?? ""}>
-                      {c.error ?? c.parse_error ?? ""}
+                    <td className="max-w-xs px-2 py-1 text-red-600">
+                      {c.error ?? c.parse_error ? (
+                        <button
+                          type="button"
+                          data-error-popover
+                          onClick={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setErrorPopover(
+                              errorPopover?.id === c.id ? null : { id: c.id, top: rect.top, left: rect.left }
+                            );
+                          }}
+                          className="block w-full max-w-xs truncate text-left underline decoration-dotted hover:decoration-solid"
+                          title="Click to see the full error"
+                        >
+                          {c.error ?? c.parse_error}
+                        </button>
+                      ) : null}
                     </td>
                     <td className="px-2 py-1">
                       {(c.status === "error" || c.parse_error) && (
@@ -496,6 +551,19 @@ export default function AttributionPage() {
           </div>
         </>
       )}
+      {errorPopover &&
+        run &&
+        createPortal(
+          <div
+            data-error-popover
+            className="fixed z-50 w-80 max-w-sm -translate-y-full rounded-md border border-slate-300 bg-white p-2 text-xs text-slate-800 shadow-lg"
+            style={{ top: errorPopover.top - 4, left: errorPopover.left }}
+          >
+            {run.cells.find((c) => c.id === errorPopover.id)?.error ??
+              run.cells.find((c) => c.id === errorPopover.id)?.parse_error}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
