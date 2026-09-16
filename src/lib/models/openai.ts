@@ -1,27 +1,36 @@
 import { ModelCallResult, ModelCallError } from "./types";
-import { fetchWithTimeout, isTimeoutError } from "./fetchTimeout";
+import { fetchWithTimeout, isTimeoutError, isAbortError } from "./fetchTimeout";
 
 // Server-side only — never import this from client components (§1).
 export async function callOpenAI(
   apiKey: string,
   modelSnapshot: string,
-  prompt: string
+  prompt: string,
+  signal?: AbortSignal
 ): Promise<ModelCallResult> {
   let res: Response;
   try {
-    res = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+    res = await fetchWithTimeout(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        // No temperature/sampling override — leave at the provider's default (§2).
+        body: JSON.stringify({
+          model: modelSnapshot,
+          messages: [{ role: "user", content: prompt }],
+        }),
       },
-      // No temperature/sampling override — leave at the provider's default (§2).
-      body: JSON.stringify({
-        model: modelSnapshot,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+      undefined,
+      signal
+    );
   } catch (err) {
+    // A deliberate cancellation (Pause) — not retryable, and not really a
+    // failure at all, so it shouldn't get logged as one; just stop.
+    if (isAbortError(err)) throw err;
     // Timeouts are retryable (§5) — a hung request shouldn't block the rest
     // of the batch's Promise.all forever, but it also isn't a permanent failure.
     if (isTimeoutError(err)) throw new ModelCallError(`OpenAI: ${err.message}`, true);

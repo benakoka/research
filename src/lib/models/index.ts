@@ -4,6 +4,7 @@ import { callAnthropic } from "./anthropic";
 import { ModelCallResult, ModelCallError } from "./types";
 import { ModelProvider } from "@/lib/types";
 import { isTestMode } from "@/lib/apiKeys";
+import { isAbortError } from "./fetchTimeout";
 
 export { ModelCallError };
 export type { ModelCallResult };
@@ -60,12 +61,22 @@ function backoffDelayMs(attempt: number): number {
  * client for the cost-visibility display — there's no server-side store to
  * accumulate it in. Throws ModelCallError on final failure so the caller can
  * store it as a per-cell error rather than crashing the batch.
+ *
+ * `signal` (optional) is the /process route's own request signal — see
+ * fetchTimeout.ts's long comment on why this matters: without it, pausing a
+ * run on the client stops the client from *waiting* on this call, but does
+ * nothing to stop this call itself, which just keeps retrying against the
+ * real provider in the background, unseen, for a cell the client already
+ * abandoned. Checked before every attempt (not just passed to the fetch)
+ * so an already-aborted call never even starts a new attempt, let alone
+ * sits through a backoff delay first.
  */
 export async function callModel(
   provider: ModelProvider,
   apiKey: string,
   modelSnapshot: string,
-  prompt: string
+  prompt: string,
+  signal?: AbortSignal
 ): Promise<ModelCallResult> {
   if (!apiKey) {
     throw new ModelCallError(
@@ -82,6 +93,7 @@ export async function callModel(
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (signal?.aborted) throw new ModelCallError("Cancelled.", false);
     try {
       // TEST MODE: a provider in test mode routes through Claude on the
       // Anthropic key instead of its own, so that slot's pipeline can be
@@ -90,12 +102,13 @@ export async function callModel(
       // slot out of test mode (its own USE_CLAUDE_FOR_TESTING case) restores
       // normal dispatch for it with no other code changes needed.
       const result = isTestMode(provider)
-        ? await callAnthropic(apiKey, modelSnapshot, prompt)
+        ? await callAnthropic(apiKey, modelSnapshot, prompt, signal)
         : provider === "GPT"
-          ? await callOpenAI(apiKey, modelSnapshot, prompt)
-          : await callGemini(apiKey, modelSnapshot, prompt);
+          ? await callOpenAI(apiKey, modelSnapshot, prompt, signal)
+          : await callGemini(apiKey, modelSnapshot, prompt, signal);
       return result;
     } catch (err) {
+      if (isAbortError(err)) throw new ModelCallError("Cancelled.", false);
       lastError = err;
       const retryable = err instanceof ModelCallError ? err.retryable : true;
       if (!retryable || attempt === MAX_ATTEMPTS) break;

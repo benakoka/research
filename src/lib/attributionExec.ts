@@ -15,10 +15,16 @@ import { buildAttributionPrompt, parseRating, MAX_RATING_PARSE_ATTEMPTS } from "
  * times, stopping the moment a number comes back. Only once every attempt
  * comes back non-numeric does this surface as an error, so a stray
  * non-numeric response no longer needs a manual "Retry" click to clear.
+ *
+ * `signal` (optional) is the /process route's own request signal, passed
+ * straight through to callModel — checked between attempts here too, so a
+ * cell paused partway through its own retry loop stops immediately rather
+ * than working through the rest of MAX_RATING_PARSE_ATTEMPTS unseen.
  */
 export async function executeAttributionCell(
   promptTemplate: string,
-  cell: AttributionCell
+  cell: AttributionCell,
+  signal?: AbortSignal
 ): Promise<AttributionCell> {
   const apiKey = getApiKey(cell.model);
 
@@ -37,7 +43,8 @@ export async function executeAttributionCell(
 
   try {
     for (let attempt = 1; attempt <= MAX_RATING_PARSE_ATTEMPTS; attempt++) {
-      const result = await callModel(cell.model, apiKey, cell.model_snapshot, combined);
+      if (signal?.aborted) throw new ModelCallError("Cancelled.", false);
+      const result = await callModel(cell.model, apiKey, cell.model_snapshot, combined, signal);
       const { rating, parseError } = parseRating(result.text);
       if (rating !== null) {
         return {

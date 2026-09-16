@@ -1,5 +1,5 @@
 import { ModelCallResult, ModelCallError } from "./types";
-import { fetchWithTimeout, isTimeoutError } from "./fetchTimeout";
+import { fetchWithTimeout, isTimeoutError, isAbortError } from "./fetchTimeout";
 
 // Server-side only — never import this from client components (§1).
 //
@@ -11,25 +11,34 @@ import { fetchWithTimeout, isTimeoutError } from "./fetchTimeout";
 export async function callAnthropic(
   apiKey: string,
   modelSnapshot: string,
-  prompt: string
+  prompt: string,
+  signal?: AbortSignal
 ): Promise<ModelCallResult> {
   let res: Response;
   try {
-    res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+    res = await fetchWithTimeout(
+      "https://api.anthropic.com/v1/messages",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        // No temperature/sampling override — leave at the provider's default (§2).
+        body: JSON.stringify({
+          model: modelSnapshot,
+          max_tokens: 1024,
+          messages: [{ role: "user", content: prompt }],
+        }),
       },
-      // No temperature/sampling override — leave at the provider's default (§2).
-      body: JSON.stringify({
-        model: modelSnapshot,
-        max_tokens: 1024,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+      undefined,
+      signal
+    );
   } catch (err) {
+    // A deliberate cancellation (Pause) — not retryable, and not really a
+    // failure at all, so it shouldn't get logged as one; just stop.
+    if (isAbortError(err)) throw err;
     // Timeouts are retryable (§5) — a hung request shouldn't block the rest
     // of the batch's Promise.all forever, but it also isn't a permanent failure.
     if (isTimeoutError(err)) throw new ModelCallError(`Anthropic: ${err.message}`, true);

@@ -41,7 +41,16 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
   }
 
   const batch = body.cells.slice(0, MAX_BATCH_SIZE);
-  const results = await Promise.all(batch.map((cell) => executeAttributionCell(body.promptTemplate, cell)));
+  // req.signal: NextRequest extends the standard Request, whose signal
+  // reflects the underlying connection closing — including the browser
+  // aborting this same fetch (attribution/page.tsx's Pause button aborts
+  // every in-flight AbortController). Threaded through so pausing actually
+  // stops the real, in-flight provider calls this request is making, not
+  // just the browser's wait for a response — see lib/models/fetchTimeout.ts
+  // for why that distinction matters.
+  const results = await Promise.all(
+    batch.map((cell) => executeAttributionCell(body.promptTemplate, cell, req.signal))
+  );
 
   return NextResponse.json({ cells: results });
 });

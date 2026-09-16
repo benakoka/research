@@ -1,11 +1,12 @@
 import { ModelCallResult, ModelCallError } from "./types";
-import { fetchWithTimeout, isTimeoutError } from "./fetchTimeout";
+import { fetchWithTimeout, isTimeoutError, isAbortError } from "./fetchTimeout";
 
 // Server-side only — never import this from client components (§1).
 export async function callGemini(
   apiKey: string,
   modelSnapshot: string,
-  prompt: string
+  prompt: string,
+  signal?: AbortSignal
 ): Promise<ModelCallResult> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     modelSnapshot
@@ -29,9 +30,13 @@ export async function callGemini(
       // needs more time than the timeout doesn't help, it just repeats the
       // same cutoff. GPT/Anthropic haven't shown this, so left at the
       // shared default rather than bumped speculatively.
-      45_000
+      45_000,
+      signal
     );
   } catch (err) {
+    // A deliberate cancellation (Pause) — not retryable, and not really a
+    // failure at all, so it shouldn't get logged as one; just stop.
+    if (isAbortError(err)) throw err;
     // Timeouts are retryable (§5) — a hung request shouldn't block the rest
     // of the batch's Promise.all forever, but it also isn't a permanent failure.
     if (isTimeoutError(err)) throw new ModelCallError(`Gemini: ${err.message}`, true);
