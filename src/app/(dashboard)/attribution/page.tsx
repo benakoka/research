@@ -335,6 +335,26 @@ export default function AttributionPage() {
     }
   }
 
+  // Resets every errored cell for one model back to "pending" and hands the
+  // run straight to driveRun — same worker-pool/batching machinery as a
+  // fresh or resumed run, just seeded with only that model's error cells
+  // instead of everything. A GPT rate-limit burst and a Gemini no-number
+  // burst are independent problems (different providers, different
+  // causes), so retrying them separately means not re-sending GPT calls
+  // that already succeeded just because Gemini also had errors, or vice
+  // versa.
+  async function retryAllErrors(model: "GPT" | "Gemini") {
+    if (!run || runningRef.current) return;
+    const cells = run.cells.map((c) =>
+      c.model === model && c.status === "error"
+        ? { ...c, status: "pending" as const, error: null, parse_error: null }
+        : c
+    );
+    const updated = { ...run, cells };
+    persist(updated);
+    driveRun(updated);
+  }
+
   async function exportRun() {
     if (!run) return;
     setExporting(true);
@@ -370,6 +390,8 @@ export default function AttributionPage() {
 
   const progress = run ? summarizeProgress(run.cells.map((c) => c.status)) : null;
   const pct = progress && progress.total > 0 ? Math.round(((progress.done + progress.error) / progress.total) * 100) : 0;
+  const gptErrorCount = run ? run.cells.filter((c) => c.model === "GPT" && c.status === "error").length : 0;
+  const geminiErrorCount = run ? run.cells.filter((c) => c.model === "Gemini" && c.status === "error").length : 0;
 
   return (
     <div className="space-y-8">
@@ -459,13 +481,41 @@ export default function AttributionPage() {
               </p>
             )}
 
-            <div className="mt-4 flex gap-3">
+            <div className="mt-4 flex flex-wrap gap-3">
               <button
                 onClick={() => exportRun()}
                 disabled={exporting}
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 {exporting ? "Exporting…" : "Export XLSX"}
+              </button>
+              <button
+                onClick={() => retryAllErrors("GPT")}
+                disabled={gptErrorCount === 0 || processing || retrying !== null}
+                title={
+                  gptErrorCount === 0
+                    ? "No errored GPT cells right now."
+                    : processing
+                    ? "Wait for the current batch to finish before retrying."
+                    : undefined
+                }
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Retry all GPT errors{gptErrorCount > 0 ? ` (${gptErrorCount})` : ""}
+              </button>
+              <button
+                onClick={() => retryAllErrors("Gemini")}
+                disabled={geminiErrorCount === 0 || processing || retrying !== null}
+                title={
+                  geminiErrorCount === 0
+                    ? "No errored Gemini cells right now."
+                    : processing
+                    ? "Wait for the current batch to finish before retrying."
+                    : undefined
+                }
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Retry all Gemini errors{geminiErrorCount > 0 ? ` (${geminiErrorCount})` : ""}
               </button>
             </div>
           </section>
