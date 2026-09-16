@@ -27,16 +27,13 @@ const BATCH_SIZE = 4;
 // such requests now run concurrently instead of one at a time, which is
 // where most of a large run's wall-clock time actually goes — a run isn't
 // bound by any single call's latency, it's bound by how many calls have to
-// happen serially before every cell's done. Confirmed (real runs' actual
-// errors) that the failures seen so far are Gemini genuinely never
-// producing a clean number in MAX_RATING_PARSE_ATTEMPTS tries — not
-// rate-limit (429) responses — so there's no evidence yet that raising this
-// trips provider limits. Raised 3 -> 5 -> 8 -> 12 -> 16 on that basis (each
-// step confirmed clean on a real run before the next); dial it back if a
-// run does start showing new rate-limit errors (a burst of 429s in the
-// error column is the tell — that's the provider's ceiling, not this
-// app's, and no batching/concurrency change here gets around it).
-const WORKER_COUNT = 16;
+// happen serially before every cell's done. Raised 3 -> 5 -> 8 -> 12 -> 16
+// while only Gemini's (non-rate-limit) no-number failures were showing up,
+// but 16 started producing real issues on GPT's side too — dialed back
+// down to 12, the last confirmed-clean step. This is a real ceiling, not
+// just caution: a burst of provider errors at a given count is the signal
+// to back off, same as it would've been for a 429.
+const WORKER_COUNT = 12;
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
