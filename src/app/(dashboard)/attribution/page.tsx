@@ -75,14 +75,21 @@ export default function AttributionPage() {
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const runningRef = useRef(false);
   // Checked at the top of every worker loop iteration (between batches) so
-  // Cancel takes effect even if a batch happens to already be in flight when
+  // Pause takes effect even if a batch happens to already be in flight when
   // it's clicked. abortControllersRef additionally kills every batch
-  // request actually in flight right now, so Cancel doesn't have to wait
+  // request actually in flight right now, so Pause doesn't have to wait
   // out a slow/retrying batch (up to ~a minute with the model-call retry
-  // policy) before doing anything.
-  const cancelRequestedRef = useRef(false);
+  // policy) before doing anything. Whatever a worker had claimed but not
+  // gotten a response for goes back to "pending" (see driveRun's finally-
+  // path below) — a pause never discards anything, it just stops sending
+  // new requests, so Resume (driveRun again on the same run) picks up
+  // exactly where it left off. That's true regardless of what started the
+  // run in the first place — a fresh run, an auto-resume on reload, or a
+  // "Retry all X errors" click all funnel through this same driveRun, so
+  // pausing/resuming works identically for all of them.
+  const pauseRequestedRef = useRef(false);
   // A Set instead of a single ref now that multiple batch requests can be
-  // in flight at once (see WORKER_COUNT) — Cancel needs to abort all of
+  // in flight at once (see WORKER_COUNT) — Pause needs to abort all of
   // them, not just the most recent one.
   const abortControllersRef = useRef<Set<AbortController>>(new Set());
   // Throughput history for the "estimated time remaining" display — see
@@ -122,7 +129,7 @@ export default function AttributionPage() {
     runningRef.current = true;
     setProcessing(true);
     setError(null);
-    cancelRequestedRef.current = false;
+    pauseRequestedRef.current = false;
     // Seed with "now, at whatever's already done" — matters for a resumed
     // run (page refresh mid-run), where cells completed in a prior session
     // shouldn't count toward this session's measured rate.
@@ -143,7 +150,7 @@ export default function AttributionPage() {
 
     async function worker() {
       while (true) {
-        if (cancelRequestedRef.current || fatalError) return;
+        if (pauseRequestedRef.current || fatalError) return;
         const pending = working.cells.filter((c) => c.status === "pending");
         if (pending.length === 0) return;
         // Same model only, not just "the next BATCH_SIZE pending cells" —
@@ -171,11 +178,11 @@ export default function AttributionPage() {
           results = await processBatch(claim, working.promptTemplate, controller.signal);
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") return;
-          // A genuine failure (not a user-requested cancel) should stop the
+          // A genuine failure (not a user-requested pause) should stop the
           // whole run, not just this worker — record it and tell the other
-          // workers to wind down too, same as a cancel would.
+          // workers to wind down too, same as a pause would.
           fatalError = err;
-          cancelRequestedRef.current = true;
+          pauseRequestedRef.current = true;
           for (const c of abortControllersRef.current) c.abort();
           return;
         } finally {
@@ -194,14 +201,15 @@ export default function AttributionPage() {
 
     try {
       await Promise.all(Array.from({ length: WORKER_COUNT }, () => worker()));
-      if (cancelRequestedRef.current && !fatalError) {
+      if (pauseRequestedRef.current && !fatalError) {
         // Any cell a worker claimed (marked "running") but never got a
         // response for — because its request was aborted mid-flight — needs
         // to go back to "pending", the same convention used on resume,
         // otherwise it'd show as permanently "running" and be missing from
-        // both the pending and completed counts.
+        // both the pending and completed counts. Resume just calls driveRun
+        // again on this same run — nothing here is discarded.
         const cells = working.cells.map((c) => (c.status === "running" ? { ...c, status: "pending" as const } : c));
-        persist({ ...working, cells, status: "cancelled" });
+        persist({ ...working, cells, status: "paused" });
         return;
       }
       if (fatalError) throw fatalError;
@@ -215,15 +223,25 @@ export default function AttributionPage() {
     }
   }
 
-  function cancelRun() {
-    if (
-      !confirm(
-        "Cancel this run? Whatever's already completed stays — you can export it — but nothing still pending will be sent."
-      )
-    )
-      return;
-    cancelRequestedRef.current = true;
+  // No confirm() here, unlike the old Cancel — pausing doesn't discard
+  // anything (every in-flight cell just goes back to "pending", see
+  // driveRun above) and Resume picks up exactly where this left off, so
+  // there's nothing destructive to double-check before doing it.
+  function pauseRun() {
+    pauseRequestedRef.current = true;
     for (const c of abortControllersRef.current) c.abort();
+  }
+
+  // Resume is really just "run driveRun again on whatever's here" — the
+  // exact same call the mount effect makes for an auto-resumed page reload,
+  // and the same one retryAllErrors makes after seeding pending cells. A
+  // paused run's pending cells are indistinguishable from any other kind,
+  // so one Resume works for a paused fresh run, a paused resumed run, or a
+  // paused "Retry all X errors" run alike.
+  function resumeRun() {
+    if (!run || runningRef.current) return;
+    const cells = run.cells.map((c) => (c.status === "running" ? { ...c, status: "pending" as const } : c));
+    driveRun({ ...run, cells });
   }
 
   // Close the error popover on any click outside it, or on scroll — since
@@ -259,10 +277,11 @@ export default function AttributionPage() {
       const stored = getAttributionRun();
       setRun(stored);
       // Resume automatically if the page was refreshed mid-run — but not a
-      // run the user deliberately cancelled.
+      // run the user deliberately paused (that needs an explicit Resume
+      // click, same as it needed an explicit un-cancel before).
       if (
         stored &&
-        stored.status !== "cancelled" &&
+        stored.status !== "paused" &&
         stored.cells.some((c) => c.status === "pending" || c.status === "running")
       ) {
         // Any cell left "running" from a torn-down tab needs to go back to
@@ -462,61 +481,76 @@ export default function AttributionPage() {
               <div className="h-full bg-slate-900 transition-all" style={{ width: `${pct}%` }} />
             </div>
             {processing && (
-              <div className="mt-1 flex items-center gap-2">
-                <p className="text-xs text-slate-500">
-                  Processing batches…{" "}
-                  {etaSeconds !== null
-                    ? `estimated time remaining: ~${formatEta(etaSeconds)}`
-                    : "estimating time remaining…"}
-                </p>
-                <button onClick={cancelRun} className="text-xs font-medium text-red-600 underline hover:text-red-800">
-                  Cancel
-                </button>
-              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Processing batches…{" "}
+                {etaSeconds !== null
+                  ? `estimated time remaining: ~${formatEta(etaSeconds)}`
+                  : "estimating time remaining…"}
+              </p>
             )}
-            {run.status === "cancelled" && (
+            {run.status === "paused" && !processing && (
               <p className="mt-1 text-xs text-amber-700">
-                ⚠ Cancelled — {progress.pending} cell{progress.pending === 1 ? "" : "s"} never got sent. Export what
-                you have below, or start a new run (this one will be replaced, not continued).
+                ⏸ Paused — {progress.pending} cell{progress.pending === 1 ? "" : "s"} not sent yet. Click Resume to
+                pick up right where this left off, or export what you have.
               </p>
             )}
 
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                onClick={() => exportRun()}
-                disabled={exporting}
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                {exporting ? "Exporting…" : "Export XLSX"}
-              </button>
-              <button
-                onClick={() => retryAllErrors("GPT")}
-                disabled={gptErrorCount === 0 || processing || retrying !== null}
-                title={
-                  gptErrorCount === 0
-                    ? "No errored GPT cells right now."
-                    : processing
-                    ? "Wait for the current batch to finish before retrying."
-                    : undefined
-                }
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Retry all GPT errors{gptErrorCount > 0 ? ` (${gptErrorCount})` : ""}
-              </button>
-              <button
-                onClick={() => retryAllErrors("Gemini")}
-                disabled={geminiErrorCount === 0 || processing || retrying !== null}
-                title={
-                  geminiErrorCount === 0
-                    ? "No errored Gemini cells right now."
-                    : processing
-                    ? "Wait for the current batch to finish before retrying."
-                    : undefined
-                }
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Retry all Gemini errors{geminiErrorCount > 0 ? ` (${geminiErrorCount})` : ""}
-              </button>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => exportRun()}
+                  disabled={exporting}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {exporting ? "Exporting…" : "Export XLSX"}
+                </button>
+                {processing && (
+                  <button
+                    onClick={pauseRun}
+                    className="rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                  >
+                    Pause
+                  </button>
+                )}
+                {run.status === "paused" && !processing && (
+                  <button
+                    onClick={resumeRun}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Resume
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => retryAllErrors("GPT")}
+                  disabled={gptErrorCount === 0 || processing || retrying !== null}
+                  title={
+                    gptErrorCount === 0
+                      ? "No errored GPT cells right now."
+                      : processing
+                      ? "Wait for the current batch to finish before retrying."
+                      : undefined
+                  }
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Retry all GPT errors{gptErrorCount > 0 ? ` (${gptErrorCount})` : ""}
+                </button>
+                <button
+                  onClick={() => retryAllErrors("Gemini")}
+                  disabled={geminiErrorCount === 0 || processing || retrying !== null}
+                  title={
+                    geminiErrorCount === 0
+                      ? "No errored Gemini cells right now."
+                      : processing
+                      ? "Wait for the current batch to finish before retrying."
+                      : undefined
+                  }
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Retry all Gemini errors{geminiErrorCount > 0 ? ` (${geminiErrorCount})` : ""}
+                </button>
+              </div>
             </div>
           </section>
 

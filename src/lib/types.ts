@@ -125,12 +125,14 @@ export interface AttributionRun {
   // Persisted client-side (localStorage) only; nothing here ever reaches a
   // database, so "download the output" is the only durable copy.
   cells: AttributionCell[];
-  // "cancelled": the user stopped the run mid-flight (Cancel button). Cells
-  // that hadn't been sent yet stay "pending" — cancelling doesn't discard
-  // anything already completed, and the run can still be exported as-is.
-  // Distinct from "pending"/"running" specifically so a page refresh doesn't
-  // auto-resume a run the user deliberately stopped.
-  status: "pending" | "running" | "done" | "cancelled";
+  // "paused": the user stopped the run mid-flight (Pause button). Cells
+  // that hadn't been sent yet stay "pending" — pausing doesn't discard
+  // anything already completed (or already pending), and clicking Resume
+  // hands the run straight back to driveRun to pick up exactly where it
+  // left off. Distinct from "pending"/"running" specifically so a page
+  // refresh doesn't auto-resume a run the user deliberately stopped —
+  // that still needs an explicit Resume click.
+  status: "pending" | "running" | "done" | "paused";
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +199,12 @@ export interface RewritingRun {
   vignetteSetFilename: string;
   // Inline, same reasoning as AttributionRun.cells above.
   chains: RewritingChain[];
-  // See AttributionRun.status — same "cancelled" meaning here.
+  // "cancelled": the user stopped the run mid-flight (Cancel button). Cells
+  // that hadn't been sent yet stay "pending" — cancelling doesn't discard
+  // anything already completed, and the run can still be exported as-is.
+  // Distinct from "pending"/"running" specifically so a page refresh
+  // doesn't auto-resume a run the user deliberately stopped. (Attribution's
+  // equivalent is "paused" — Attribution's Cancel became a resumable Pause,
+  // Rewriting's has not.)
   status: "pending" | "running" | "done" | "cancelled";
 }
