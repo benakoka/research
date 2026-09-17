@@ -8,6 +8,15 @@ export interface Settings {
   gptModelSnapshot: string;
   geminiModelSnapshot: string;
 
+  // Which models a run actually uses — both Attribution (buildAttributionCells)
+  // and Rewriting (buildRewritingChains) skip a model entirely (no cells/
+  // chains built for it at all, not just skipped at call time) when its
+  // flag here is false, so someone testing/short on budget for one
+  // provider can run the other alone. Both false is invalid (nothing to
+  // run) — the Attribution/Rewriting pages block starting a run in that
+  // case rather than silently building zero cells.
+  enabledModels: { GPT: boolean; Gemini: boolean };
+
   // §3 rating prompt template — the fixed second half of the prompt, sent
   // after a domain/valence-specific opening question (hardcoded, not part
   // of this template — see lib/attribution.ts's DOMAIN_VALENCE_QUESTIONS).
@@ -44,6 +53,7 @@ rewritten passage.`;
 export const DEFAULT_SETTINGS: Settings = {
   gptModelSnapshot: "",
   geminiModelSnapshot: "",
+  enabledModels: { GPT: true, Gemini: true },
   attributionPromptTemplate: DEFAULT_ATTRIBUTION_PROMPT,
   rewritingPromptTemplate: DEFAULT_REWRITING_PROMPT,
   defaultRepCount: 1,

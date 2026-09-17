@@ -118,12 +118,18 @@ export function cellId(vignetteId: string, direction: ScaleDirection, model: Mod
   return `${vignetteId}::${direction}::${model}::rep${rep}`;
 }
 
-/** Builds the full set of pending cells for a run: rows × 2 directions × 2 models × reps. */
+/**
+ * Builds the full set of pending cells for a run: rows × 2 directions × (1
+ * or 2 models, per enabledModels) × reps. A model with its flag off is
+ * skipped entirely — no cells for it at all, not filtered out afterward —
+ * so a run with one model disabled only ever calls the other.
+ */
 export function buildAttributionCells(
   rows: VignetteRow[],
   repCount: number,
   gptModelSnapshot: string,
-  geminiModelSnapshot: string
+  geminiModelSnapshot: string,
+  enabledModels: { GPT: boolean; Gemini: boolean } = { GPT: true, Gemini: true }
 ): AttributionCell[] {
   // Defense in depth: the Settings UI already clamps this, but a run must
   // never silently build zero cells because repCount was 0, negative, or
@@ -134,11 +140,12 @@ export function buildAttributionCells(
     GPT: gptModelSnapshot,
     Gemini: geminiModelSnapshot,
   };
+  const activeModels = MODELS.filter((m) => enabledModels[m]);
   const cells: AttributionCell[] = [];
   for (const row of rows) {
     for (const direction of DIRECTIONS) {
       const { femaleSlotName, maleSlotName } = slotNames(row, direction);
-      for (const model of MODELS) {
+      for (const model of activeModels) {
         for (let rep = 1; rep <= reps; rep++) {
           cells.push({
             id: cellId(row.vignette_id, direction, model, rep),

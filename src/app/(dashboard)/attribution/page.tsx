@@ -303,11 +303,16 @@ export default function AttributionPage() {
     setError(null);
     try {
       const settings = getSettings();
+      if (!settings.enabledModels.GPT && !settings.enabledModels.Gemini) {
+        setError("Both GPT and Gemini are turned off in Settings — enable at least one before starting a run.");
+        return;
+      }
       const cells = buildAttributionCells(
         vignetteSet.rows,
         settings.defaultRepCount,
         settings.gptModelSnapshot,
-        settings.geminiModelSnapshot
+        settings.geminiModelSnapshot,
+        settings.enabledModels
       );
       const newRun: AttributionRun = {
         id: crypto.randomUUID(),

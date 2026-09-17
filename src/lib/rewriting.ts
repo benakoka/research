@@ -46,12 +46,17 @@ export function pendingGeneration(generation: number, target: number): Rewriting
   };
 }
 
-/** Builds the chains for a run: rows × 2 models, each starting from the row's own seed text (§4). */
+/**
+ * Builds the chains for a run: rows × (1 or 2 models, per enabledModels),
+ * each starting from the row's own seed text (§4). A model with its flag
+ * off gets no chains at all, not chains that are filtered out afterward.
+ */
 export function buildRewritingChains(
   rows: VignetteRow[],
   wordCountTargets: [number, number, number, number, number],
   gptModelSnapshot: string,
-  geminiModelSnapshot: string
+  geminiModelSnapshot: string,
+  enabledModels: { GPT: boolean; Gemini: boolean } = { GPT: true, Gemini: true }
 ): RewritingChain[] {
   // Defense in depth: the Settings UI already clamps these, but a target of
   // 0/negative/fractional words would either build a chain that can never
@@ -68,11 +73,12 @@ export function buildRewritingChains(
     GPT: gptModelSnapshot,
     Gemini: geminiModelSnapshot,
   };
+  const activeModels = MODELS.filter((m) => enabledModels[m]);
   const now = new Date().toISOString();
   const chains: RewritingChain[] = [];
   let counter = 1;
   for (const row of rows) {
-    for (const model of MODELS) {
+    for (const model of activeModels) {
       const chainId = `CHAIN-${String(counter).padStart(4, "0")}`;
       counter++;
       chains.push({

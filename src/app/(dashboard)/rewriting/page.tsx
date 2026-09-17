@@ -270,11 +270,16 @@ export default function RewritingPage() {
     setError(null);
     try {
       const settings = getSettings();
+      if (!settings.enabledModels.GPT && !settings.enabledModels.Gemini) {
+        setError("Both GPT and Gemini are turned off in Settings — enable at least one before starting a run.");
+        return;
+      }
       const chains = buildRewritingChains(
         vignetteSet.rows,
         settings.defaultWordCountTargets,
         settings.gptModelSnapshot,
-        settings.geminiModelSnapshot
+        settings.geminiModelSnapshot,
+        settings.enabledModels
       );
       const newRun: RewritingRun = {
         id: crypto.randomUUID(),

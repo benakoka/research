@@ -193,7 +193,16 @@ export default function SettingsPage() {
         <p className="mb-4 text-xs text-slate-500">
           Free text, used for every API call in both modules. There is no
           default baked in — flagship versions cycle too often for that.
+          Uncheck a model below to run Attribution/Rewriting with only the
+          other one — no cells/chains get built for a disabled model at
+          all, not just skipped once built.
         </p>
+        {!data.enabledModels.GPT && !data.enabledModels.Gemini && (
+          <p className="mb-4 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+            ⚠ Both models are off — check at least one, or Attribution/Rewriting
+            won&apos;t let you start a run.
+          </p>
+        )}
         {anyTestMode && (
           <div className="mb-4 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
             <span>
@@ -209,34 +218,56 @@ export default function SettingsPage() {
             </button>
           </div>
         )}
-        <Field
-          label="GPT model snapshot"
-          htmlFor="gpt-model-snapshot"
-          hint={keyStatus?.gptTestMode ? "Test mode: enter a Claude model ID here, not a GPT one." : "Recommended: gpt-5.6"}
-        >
-          <input
-            id="gpt-model-snapshot"
-            aria-describedby="gpt-model-snapshot-hint"
-            value={data.gptModelSnapshot}
-            onChange={(e) => update("gptModelSnapshot", e.target.value)}
-            className={inputClass + " font-mono"}
-          />
-        </Field>
-        <Field
-          label="Gemini model snapshot"
-          htmlFor="gemini-model-snapshot"
-          hint={
-            keyStatus?.geminiTestMode ? "Test mode: enter a Claude model ID here, not a Gemini one." : "Recommended: gemini-3.6-flash"
-          }
-        >
-          <input
-            id="gemini-model-snapshot"
-            aria-describedby="gemini-model-snapshot-hint"
-            value={data.geminiModelSnapshot}
-            onChange={(e) => update("geminiModelSnapshot", e.target.value)}
-            className={inputClass + " font-mono"}
-          />
-        </Field>
+        <div className={data.enabledModels.GPT ? undefined : "opacity-50"}>
+          <label className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              checked={data.enabledModels.GPT}
+              onChange={(e) => update("enabledModels", { ...data.enabledModels, GPT: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            Include GPT in runs
+          </label>
+          <Field
+            label="GPT model snapshot"
+            htmlFor="gpt-model-snapshot"
+            hint={keyStatus?.gptTestMode ? "Test mode: enter a Claude model ID here, not a GPT one." : "Recommended: gpt-5.6"}
+          >
+            <input
+              id="gpt-model-snapshot"
+              aria-describedby="gpt-model-snapshot-hint"
+              value={data.gptModelSnapshot}
+              onChange={(e) => update("gptModelSnapshot", e.target.value)}
+              className={inputClass + " font-mono"}
+            />
+          </Field>
+        </div>
+        <div className={data.enabledModels.Gemini ? undefined : "opacity-50"}>
+          <label className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              checked={data.enabledModels.Gemini}
+              onChange={(e) => update("enabledModels", { ...data.enabledModels, Gemini: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            Include Gemini in runs
+          </label>
+          <Field
+            label="Gemini model snapshot"
+            htmlFor="gemini-model-snapshot"
+            hint={
+              keyStatus?.geminiTestMode ? "Test mode: enter a Claude model ID here, not a Gemini one." : "Recommended: gemini-3.6-flash"
+            }
+          >
+            <input
+              id="gemini-model-snapshot"
+              aria-describedby="gemini-model-snapshot-hint"
+              value={data.geminiModelSnapshot}
+              onChange={(e) => update("geminiModelSnapshot", e.target.value)}
+              className={inputClass + " font-mono"}
+            />
+          </Field>
+        </div>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6">
