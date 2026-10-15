@@ -163,8 +163,16 @@ export function buildAttributionAnalysisCsv(cells: AttributionCell[]): string {
     const ratingIdSuffix = generation > 0 ? `_Gen${generation}` : "";
     const ratingId = itemCode ? `${raterId}${ratingIdSuffix}_${itemCode}` : NA;
 
-    const textId =
-      generation === 0 ? baseId : `${raterId}:Gen${generation}${rewriteModel ? `-${rewriteModel}` : ""}`;
+    // One consistent shape for every row, generation 0 included — always
+    // rater:Gen{N}[-{rewriteModel}]:{item_code}. Earlier this used bare
+    // vignette_id for generation 0 and switched to a different shape
+    // otherwise, which both looked inconsistent *and* was a real bug: that
+    // other shape carried no vignette-identifying part at all, so two
+    // different stories rated by the same rep at the same generation
+    // produced the exact same text_id. Splicing item_code in (already
+    // computed above) fixes both at once — it's what actually identifies
+    // which text this is.
+    const textId = `${raterId}:Gen${generation}${rewriteModel ? `-${rewriteModel}` : ""}:${itemCode ?? NA}`;
 
     rows.push([
       ratingId,
