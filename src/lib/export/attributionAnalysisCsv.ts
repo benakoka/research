@@ -138,6 +138,24 @@ function parseGenerationSuffix(vignetteId: string): { baseId: string; generation
   return { baseId: match[1], generation: Number(match[2]), rewriteModel: match[3] ?? null };
 }
 
+// cell.scenario_number is NOT always the original 1/2/3 — a vignette set
+// that went through the Rewriting module's "export as vignette upload"
+// re-encodes it as original*1000 + generation*10 + modelSlot (see
+// lib/export/rewriting.ts) so Attribution's own pairing math keeps every
+// generation/model combination correctly isolated. That encoding is purely
+// internal to Attribution's math; this export needs the real scenario
+// number, both for its own scenario_number column and for the item_code
+// lookup table below (keyed on 1/2/3 — every cell from a rewriting-chain
+// export was otherwise falling through to "no match", which is why every
+// item_code/text_id/rating_id came out "...NA" for that data). Read it
+// from the vignette_id text itself instead, which always has the real
+// number in it regardless of what scenario_number was re-encoded to —
+// "Scenario 2" in "Rationality-Credit-Scenario 2-A", say.
+function trueScenarioNumber(baseId: string, fallback: number): number {
+  const match = baseId.match(/Scenario\s+(\d+)/i);
+  return match ? Number(match[1]) : fallback;
+}
+
 /**
  * Builds the analysis-dataset-format CSV from this run's cells. Only cells
  * that actually finished with a real rating go in — raw_scale_value has to
@@ -151,9 +169,10 @@ export function buildAttributionAnalysisCsv(cells: AttributionCell[]): string {
     if (cell.status !== "done" || cell.rating === null) continue;
 
     const { baseId, generation, rewriteModel } = parseGenerationSuffix(cell.vignette_id);
+    const scenarioNumber = trueScenarioNumber(baseId, cell.scenario_number);
     const raterId = `${cell.model}-rep${cell.rep}`;
     const maleAtPositiveEnd = cell.scale_direction === "flipped";
-    const itemCode = computeItemCode(cell.domain, cell.valence, cell.scenario_number, cell.order_variant, maleAtPositiveEnd);
+    const itemCode = computeItemCode(cell.domain, cell.valence, scenarioNumber, cell.order_variant, maleAtPositiveEnd);
     const orderConflict = itemCode !== null && cell.order_variant !== itemCode[2];
 
     // See the matching comment on computeItemCode: a scenario this table
@@ -192,7 +211,7 @@ export function buildAttributionAnalysisCsv(cells: AttributionCell[]): string {
       generation,
       TITLE_CASE_DOMAIN[cell.domain] ?? cell.domain,
       TITLE_CASE_VALENCE[cell.valence] ?? cell.valence,
-      cell.scenario_number,
+      scenarioNumber,
       cell.order_variant,
       cell.name_race || NA,
       baseId,
