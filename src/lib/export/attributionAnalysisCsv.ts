@@ -191,7 +191,17 @@ export function buildAttributionAnalysisCsv(cells: AttributionCell[]): string {
     // produced the exact same text_id. Splicing item_code in (already
     // computed above) fixes both at once — it's what actually identifies
     // which text this is.
-    const textId = `${raterId}:Gen${generation}${rewriteModel ? `-${rewriteModel}` : ""}:${itemCode ?? NA}`;
+    //
+    // The -{rewriteModel} suffix is only worth showing when it adds real
+    // information: Rewriting ran both models, and Attribution then rates
+    // every generation with both models too, so a rewrite gets BOTH
+    // self-rated ("GPT-rep1:Gen1-GPT", GPT rating its own rewrite) and
+    // cross-rated ("GPT-rep1:Gen1-Gemini", GPT rating Gemini's rewrite)
+    // combinations. The suffix is what distinguishes those two in the
+    // cross case — but in the self-rated case it's just restating the
+    // rater's own model a second time, so it's dropped there.
+    const rewriteModelSuffix = rewriteModel && rewriteModel !== cell.model ? `-${rewriteModel}` : "";
+    const textId = `${raterId}:Gen${generation}${rewriteModelSuffix}:${itemCode ?? NA}`;
 
     rows.push([
       ratingId,
