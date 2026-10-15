@@ -51,7 +51,7 @@ export default function AttributionPage() {
   const [run, setRun] = useState<AttributionRun | null>(null);
   const [starting, setStarting] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<"xlsx" | "analysis_csv" | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
   // The open error popover, if any (see the error <td> below) — id plus the
   // clicked button's own on-screen position, captured at click time.
@@ -379,22 +379,22 @@ export default function AttributionPage() {
     driveRun(updated);
   }
 
-  async function exportRun() {
+  async function exportRun(format: "xlsx" | "analysis_csv" = "xlsx") {
     if (!run) return;
-    setExporting(true);
+    setExporting(format);
     setError(null);
     try {
       const res = await fetch("/api/attribution/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cells: run.cells }),
+        body: JSON.stringify({ cells: run.cells, format }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? "Export failed.");
       }
       const blob = await res.blob();
-      downloadBlob(blob, "attribution.xlsx");
+      downloadBlob(blob, format === "xlsx" ? "attribution.xlsx" : "attribution_analysis_dataset.csv");
       // A successful export is a durable copy outside this browser's
       // storage, so whatever the local-save situation is no longer matters
       // for anything already in the file.
@@ -402,7 +402,7 @@ export default function AttributionPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed.");
     } finally {
-      setExporting(false);
+      setExporting(null);
     }
   }
 
@@ -503,11 +503,19 @@ export default function AttributionPage() {
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap gap-3">
                 <button
-                  onClick={() => exportRun()}
-                  disabled={exporting}
+                  onClick={() => exportRun("xlsx")}
+                  disabled={exporting !== null}
                   className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
-                  {exporting ? "Exporting…" : "Export XLSX"}
+                  {exporting === "xlsx" ? "Exporting…" : "Export XLSX"}
+                </button>
+                <button
+                  onClick={() => exportRun("analysis_csv")}
+                  disabled={exporting !== null}
+                  title="Matches the column schema of the human-rater comparison study's export, so AI rows can sit alongside human ones."
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {exporting === "analysis_csv" ? "Exporting…" : "Export analysis-dataset CSV"}
                 </button>
                 {processing && (
                   <button

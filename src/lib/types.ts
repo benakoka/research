@@ -80,6 +80,11 @@ export interface VignetteRow {
   female_name: string;
   male_name: string;
   vignette_text: string;
+  // Optional — not in REQUIRED_HEADERS, so most uploads simply won't have
+  // this column and it stays "". Carried through only so the Attribution
+  // analysis-dataset CSV export (lib/export/attributionAnalysisCsv.ts) can
+  // populate its own name_race column; nothing else in the app reads it.
+  name_race: string;
 }
 
 export interface VignetteSet {
@@ -104,6 +109,10 @@ export interface AttributionCell {
   order_variant: OrderVariant;
   female_name: string;
   male_name: string;
+  // Carried from VignetteRow.name_race (see its comment) — "" when the
+  // upload had no name_race column. Only read by the Attribution
+  // analysis-dataset CSV export.
+  name_race: string;
   // Denormalized onto the cell (rather than looked up server-side by
   // vignette_id) because there's no server-side store to look it up from —
   // every API call is a stateless transform over exactly what the client
@@ -192,6 +201,7 @@ export interface RewritingChain {
   actor_second_name: string;
   female_name: string;
   male_name: string;
+  name_race: string;
   model: ModelProvider;
   model_snapshot: string;
   wordCountTargets: [number, number, number, number, number];

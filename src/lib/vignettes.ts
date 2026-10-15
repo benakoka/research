@@ -146,6 +146,12 @@ export async function parseVignetteWorkbook(buffer: ArrayBuffer): Promise<Parsed
     const female_name = get("female_name");
     const male_name = get("male_name");
     const vignette_text = get("vignette_text");
+    // Optional, not in REQUIRED_HEADERS — most uploads won't have this
+    // column at all (headerToCol simply won't have "name_race"), so this
+    // reads "" rather than throwing, same as any other missing optional
+    // column would.
+    const nameRaceCol = headerToCol.get("name_race");
+    const name_race = nameRaceCol ? cellText(row.getCell(nameRaceCol).value).trim() : "";
 
     if (!female_name || !male_name) {
       throw new VignetteParseError(
@@ -174,6 +180,7 @@ export async function parseVignetteWorkbook(buffer: ArrayBuffer): Promise<Parsed
       female_name,
       male_name,
       vignette_text,
+      name_race,
     });
   }
 

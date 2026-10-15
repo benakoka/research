@@ -92,6 +92,7 @@ export function buildRewritingChains(
         actor_second_name: row.actor_second_name,
         female_name: row.female_name,
         male_name: row.male_name,
+        name_race: row.name_race,
         model,
         model_snapshot: snapshotFor[model],
         wordCountTargets: targets,

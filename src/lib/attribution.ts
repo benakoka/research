@@ -156,6 +156,7 @@ export function buildAttributionCells(
             order_variant: row.order_variant,
             female_name: row.female_name,
             male_name: row.male_name,
+            name_race: row.name_race,
             vignette_text: row.vignette_text,
             scale_direction: direction,
             plus50_name: femaleSlotName,

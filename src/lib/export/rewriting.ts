@@ -16,6 +16,7 @@ const AS_VIGNETTES_HEADERS = [
   "valence",
   "scenario_number",
   "order_variant",
+  "name_race",
   "actor_first_name",
   "actor_second_name",
   "female_name",
@@ -175,6 +176,7 @@ export function buildRewritingAsVignettesWorkbook(chains: RewritingChain[]): Exc
         chain.valence,
         scenario_number,
         chain.order_variant,
+        chain.name_race,
         chain.actor_first_name,
         chain.actor_second_name,
         chain.female_name,
@@ -187,7 +189,7 @@ export function buildRewritingAsVignettesWorkbook(chains: RewritingChain[]): Exc
   }
 
   sheet.columns.forEach((col, i) => {
-    col.width = i === 9 ? 60 : 16; // vignette_text (index 9) wide, everything else compact
+    col.width = i === 10 ? 60 : 16; // vignette_text (index 10, after adding name_race) wide, everything else compact
   });
 
   return workbook;
