@@ -35,6 +35,11 @@ export interface Settings {
   // Retry threshold for rewriting word-count compliance, as a fraction (0.25 = 25%).
   // Adjustable constant per §4 — not meant to be a hardcoded magic number.
   retryThresholdFraction: number;
+
+  // Whether the retry threshold above is actually enforced. False means a
+  // generation's first attempt is always accepted, regardless of how far it
+  // misses its word-count target — no retrying on word count at all.
+  retryThresholdEnabled: boolean;
 }
 
 // The opening question (§3) now varies by domain/valence — see
@@ -57,8 +62,9 @@ export const DEFAULT_SETTINGS: Settings = {
   attributionPromptTemplate: DEFAULT_ATTRIBUTION_PROMPT,
   rewritingPromptTemplate: DEFAULT_REWRITING_PROMPT,
   defaultRepCount: 1,
-  defaultWordCountTargets: [55, 50, 45, 40, 35],
+  defaultWordCountTargets: [49, 40, 33, 27, 22],
   retryThresholdFraction: 0.1,
+  retryThresholdEnabled: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -216,6 +222,7 @@ export interface RewritingRun {
   gptModelSnapshot: string;
   geminiModelSnapshot: string;
   retryThresholdFraction: number;
+  retryThresholdEnabled: boolean;
   vignetteSetFilename: string;
   // Inline, same reasoning as AttributionRun.cells above.
   chains: RewritingChain[];

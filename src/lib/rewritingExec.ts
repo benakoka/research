@@ -21,6 +21,7 @@ import { countWords, missesTarget, MAX_REWRITE_ATTEMPTS } from "./wordcount";
 export async function executeGeneration(
   promptTemplate: string,
   retryThresholdFraction: number,
+  retryThresholdEnabled: boolean,
   chain: RewritingChain,
   genIndex: number
 ): Promise<RewritingGeneration> {
@@ -37,7 +38,7 @@ export async function executeGeneration(
       const wordCount = countWords(result.text);
       attempts.push({ attempt: attemptNum, text: result.text, word_count: wordCount });
 
-      if (!missesTarget(wordCount, target, retryThresholdFraction)) {
+      if (!retryThresholdEnabled || !missesTarget(wordCount, target, retryThresholdFraction)) {
         return {
           generation: genIndex,
           text: result.text,

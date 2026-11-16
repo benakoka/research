@@ -32,6 +32,7 @@ interface ProcessBody {
   chains: RewritingChain[];
   promptTemplate: string;
   retryThresholdFraction: number;
+  retryThresholdEnabled: boolean;
 }
 
 export const POST = withApiErrorHandling(async (req: NextRequest) => {
@@ -50,7 +51,13 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
 
   const updatedChains = await Promise.all(
     runnable.map(async ({ chain, genIndex }) => {
-      const generation = await executeGeneration(body.promptTemplate, body.retryThresholdFraction, chain, genIndex);
+      const generation = await executeGeneration(
+        body.promptTemplate,
+        body.retryThresholdFraction,
+        body.retryThresholdEnabled,
+        chain,
+        genIndex
+      );
       const generations = [...chain.generations];
       generations[genIndex] = generation;
       return { ...chain, generations };

@@ -402,29 +402,40 @@ export default function SettingsPage() {
         <Field
           label="Retry threshold"
           htmlFor="retry-threshold"
-          hint="Retry once, automatically, if a generation misses its target by more than this fraction. Adjustable, not a hardcoded magic number."
+          hint="Retry once, automatically, if a generation misses its target by more than this fraction. Adjustable, not a hardcoded magic number. Turn off to always accept the first attempt, regardless of word count."
         >
-          <div className="flex items-center gap-2">
-            <input
-              id="retry-threshold"
-              aria-describedby="retry-threshold-hint"
-              type="number"
-              min={0}
-              max={100}
-              step={1}
-              value={retryThresholdRaw ?? String(Math.round(data.retryThresholdFraction * 100))}
-              onChange={(e) => setRetryThresholdRaw(e.target.value)}
-              onBlur={() => {
-                if (retryThresholdRaw === null) return;
-                const pct = Math.round(Number(retryThresholdRaw));
-                const currentPct = Math.round(data.retryThresholdFraction * 100);
-                const clamped = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : currentPct;
-                update("retryThresholdFraction", clamped / 100);
-                setRetryThresholdRaw(null);
-              }}
-              className={inputClass + " w-24"}
-            />
-            <span className="text-sm text-slate-500">%</span>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={data.retryThresholdEnabled}
+                onChange={(e) => update("retryThresholdEnabled", e.target.checked)}
+              />
+              Enabled
+            </label>
+            <div className={"flex items-center gap-2" + (data.retryThresholdEnabled ? "" : " opacity-50")}>
+              <input
+                id="retry-threshold"
+                aria-describedby="retry-threshold-hint"
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                disabled={!data.retryThresholdEnabled}
+                value={retryThresholdRaw ?? String(Math.round(data.retryThresholdFraction * 100))}
+                onChange={(e) => setRetryThresholdRaw(e.target.value)}
+                onBlur={() => {
+                  if (retryThresholdRaw === null) return;
+                  const pct = Math.round(Number(retryThresholdRaw));
+                  const currentPct = Math.round(data.retryThresholdFraction * 100);
+                  const clamped = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : currentPct;
+                  update("retryThresholdFraction", clamped / 100);
+                  setRetryThresholdRaw(null);
+                }}
+                className={inputClass + " w-24"}
+              />
+              <span className="text-sm text-slate-500">%</span>
+            </div>
           </div>
         </Field>
       </section>

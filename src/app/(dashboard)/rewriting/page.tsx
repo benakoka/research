@@ -108,12 +108,13 @@ export default function RewritingPage() {
     chains: RewritingChain[],
     promptTemplate: string,
     retryThresholdFraction: number,
+    retryThresholdEnabled: boolean,
     signal?: AbortSignal
   ) {
     const res = await fetch("/api/rewriting/process", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chains, promptTemplate, retryThresholdFraction }),
+      body: JSON.stringify({ chains, promptTemplate, retryThresholdFraction, retryThresholdEnabled }),
       signal,
     });
     const body = await res.json();
@@ -177,6 +178,7 @@ export default function RewritingPage() {
             claim.map((x) => x.chain),
             working.promptTemplate,
             working.retryThresholdFraction,
+            working.retryThresholdEnabled,
             controller.signal
           );
         } catch (err) {
@@ -288,6 +290,7 @@ export default function RewritingPage() {
         gptModelSnapshot: settings.gptModelSnapshot,
         geminiModelSnapshot: settings.geminiModelSnapshot,
         retryThresholdFraction: settings.retryThresholdFraction,
+        retryThresholdEnabled: settings.retryThresholdEnabled,
         vignetteSetFilename: vignetteSet.filename,
         chains,
         status: "pending",
@@ -423,7 +426,8 @@ export default function RewritingPage() {
             <p className="mb-2 text-sm text-slate-600">
               GPT {run.gptModelSnapshot || "(no snapshot)"} · Gemini{" "}
               {run.geminiModelSnapshot || "(no snapshot)"} · retry threshold{" "}
-              {Math.round(run.retryThresholdFraction * 100)}% · from {run.vignetteSetFilename}
+              {run.retryThresholdEnabled ? `${Math.round(run.retryThresholdFraction * 100)}%` : "off"} · from{" "}
+              {run.vignetteSetFilename}
             </p>
             <div className="mb-1 flex justify-between text-sm text-slate-600">
               <span>
