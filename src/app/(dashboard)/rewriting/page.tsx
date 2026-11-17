@@ -179,19 +179,6 @@ export default function RewritingPage() {
     }
   }
 
-  // §7: both the successful-outputs CSV and the full attempt log
-  // auto-download the moment a run actually finishes (not on every resume
-  // of an already-finished run — driveRun is never re-invoked for one, see
-  // the mount effect below).
-  async function autoExportOnFinish(chains: RewritingChain[]) {
-    try {
-      await Promise.all([downloadExport(chains, "long"), downloadExport(chains, "attempt_log")]);
-      setStorageWarning(null);
-    } catch (err) {
-      setError(err instanceof Error ? `Auto-export on finish failed: ${err.message}` : "Auto-export on finish failed.");
-    }
-  }
-
   async function processBatch(
     chains: RewritingChain[],
     promptTemplate: string,
@@ -321,7 +308,6 @@ export default function RewritingPage() {
       }
       if (fatalError) throw fatalError;
       persist({ ...working, status: "done" });
-      await autoExportOnFinish(working.chains);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Batch failed.");
     } finally {
@@ -484,9 +470,9 @@ export default function RewritingPage() {
         <h1 className="text-xl font-semibold text-slate-900">Rewriting module</h1>
         <p className="mt-1 text-sm text-slate-600">
           Each selected row × enabled model = an independent 5-generation transmission
-          chain. Word-count targets, retry threshold, temperature, and retry budgets come
-          from Settings. Nothing is saved on a server — this run lives in your browser
-          until you export it (both CSVs auto-download when a run finishes).
+          chain. Word-count targets, retry threshold, and retry budgets come from Settings.
+          Nothing is saved on a server — this run lives in your browser until you
+          export it using the buttons below.
         </p>
       </div>
 
