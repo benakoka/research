@@ -60,6 +60,30 @@ function clear(key: string): void {
   window.localStorage.removeItem(key);
 }
 
+// Real per-origin localStorage quotas vary by browser and aren't queryable
+// directly, so this is a heuristic, not a measurement: it sums every key's
+// character length against a conservative assumed ~5MB cap (most browsers
+// allow at least that much, many allow more), deliberately erring toward
+// warning too early rather than too late. Used to warn proactively
+// (storageWarning in the Rewriting page) *before* an actual write failure,
+// not just react to one after the fact.
+const ASSUMED_QUOTA_CHARS = 5 * 1024 * 1024;
+
+export function estimateLocalStorageUsageFraction(): number {
+  if (!isBrowser()) return 0;
+  try {
+    let total = 0;
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (!key) continue;
+      total += key.length + (window.localStorage.getItem(key)?.length ?? 0);
+    }
+    return total / ASSUMED_QUOTA_CHARS;
+  } catch {
+    return 0;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------

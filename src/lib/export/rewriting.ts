@@ -3,25 +3,28 @@ import { RewritingChain } from "@/lib/types";
 import { toCsv } from "@/lib/csv";
 
 // Column order for buildRewritingAsVignettesWorkbook's "Vignettes" sheet —
-// the first 10 are exactly lib/vignettes.ts's REQUIRED_HEADERS, in that
-// order, so the file re-uploads through the Attribution/Rewriting modules'
-// own parser unmodified. The trailing two are additive/informational —
-// parseVignetteWorkbook looks columns up by header name, so extra columns
-// it doesn't recognize are silently ignored on re-upload — added so a
-// person can tell which chain/generation a row came from without having
-// to parse it back out of vignette_id.
+// the first columns are exactly lib/vignettes.ts's REQUIRED_HEADERS, in
+// that order, so the file re-uploads through the Attribution/Rewriting
+// modules' own parser unmodified. The trailing ones are additive/
+// informational — parseVignetteWorkbook looks columns up by header name, so
+// extra columns it doesn't recognize are silently ignored on re-upload —
+// added so a person can tell which chain/generation a row came from without
+// having to parse it back out of vignette_id.
 const AS_VIGNETTES_HEADERS = [
   "vignette_id",
+  "base_vignette_id",
+  "scenario",
   "domain",
   "valence",
   "scenario_number",
   "order_variant",
-  "name_race",
   "actor_first_name",
   "actor_second_name",
   "female_name",
   "male_name",
   "vignette_text",
+  "word_count",
+  "name_race",
   "rewrite_generation",
   "rewrite_model",
 ] as const;
@@ -32,14 +35,21 @@ const AS_VIGNETTES_HEADERS = [
 // time, not the failed attempt), so every attempt's word count is compliance
 // data worth keeping, not just a single first-vs-retry pair. Full per-attempt
 // text lives in `attempts_json` rather than as one column per attempt, since
-// the number of attempts varies per generation.
+// the number of attempts varies per generation. base_vignette_id/scenario/
+// name_race/word_count are carried straight through from the uploaded
+// vignette file (§2) onto every row here, word_count being the *seed's*
+// declared word count (not this generation's own — that's actual_word_count).
 const LONG_HEADERS = [
   "chain_id",
   "vignette_id",
+  "base_vignette_id",
+  "scenario",
   "domain",
   "valence",
   "scenario_number",
   "order_variant",
+  "name_race",
+  "word_count",
   "model",
   "model_snapshot",
   "generation",
@@ -52,18 +62,31 @@ const LONG_HEADERS = [
   "attempts_json",
 ] as const;
 
-/** Long-format CSV (§4 Output). One row per generation (0-5, 0=seed) per chain. */
+/**
+ * Long-format CSV of successful outputs only (§7a) — one row per generation
+ * (0-5, 0=seed) per chain, but only generations that actually finished
+ * (status "done"); a generation that errored out (exhausted one of its
+ * retry budgets — see lib/rewritingExec.ts) has nothing usable to export
+ * here and is skipped, not emitted with blank/partial text. The full record
+ * of every attempt, successful or not, is the separate attempt-log export
+ * (lib/export/rewritingAttemptLog.ts, §7b).
+ */
 export function buildRewritingLongCsv(chains: RewritingChain[]): string {
   const rows: (string | number | null)[][] = [];
   for (const chain of chains) {
     for (const gen of chain.generations) {
+      if (gen.status !== "done") continue;
       rows.push([
         chain.id,
         chain.vignette_id,
+        chain.base_vignette_id,
+        chain.scenario,
         chain.domain,
         chain.valence,
         chain.scenario_number,
         chain.order_variant,
+        chain.name_race,
+        chain.word_count,
         chain.model,
         chain.model_snapshot,
         gen.generation,
@@ -172,16 +195,19 @@ export function buildRewritingAsVignettesWorkbook(chains: RewritingChain[]): Exc
 
       sheet.addRow([
         vignette_id,
+        chain.base_vignette_id,
+        chain.scenario,
         chain.domain,
         chain.valence,
         scenario_number,
         chain.order_variant,
-        chain.name_race,
         chain.actor_first_name,
         chain.actor_second_name,
         chain.female_name,
         chain.male_name,
         gen.text,
+        gen.actual_word_count,
+        chain.name_race,
         gen.generation,
         isSeed ? "" : chain.model,
       ]);
@@ -189,7 +215,7 @@ export function buildRewritingAsVignettesWorkbook(chains: RewritingChain[]): Exc
   }
 
   sheet.columns.forEach((col, i) => {
-    col.width = i === 10 ? 60 : 16; // vignette_text (index 10, after adding name_race) wide, everything else compact
+    col.width = i === 11 ? 60 : 16; // vignette_text (index 11) wide, everything else compact
   });
 
   return workbook;

@@ -6,6 +6,7 @@ export async function callGemini(
   apiKey: string,
   modelSnapshot: string,
   prompt: string,
+  temperature?: number,
   signal?: AbortSignal
 ): Promise<ModelCallResult> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
@@ -19,9 +20,12 @@ export async function callGemini(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // No generationConfig.temperature override — leave at the provider's default (§2).
+        // generationConfig.temperature is sent only when the caller passes
+        // one explicitly (Rewriting, from Settings per §6) — omitted
+        // otherwise (Attribution), leaving the provider's own default.
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
+          ...(temperature !== undefined ? { generationConfig: { temperature } } : {}),
         }),
       },
       // Longer than the shared default (30s) specifically for Gemini: under
@@ -58,7 +62,9 @@ export async function callGemini(
   }
 
   let json: {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    modelVersion?: string;
+    candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+    promptFeedback?: { blockReason?: string };
     usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
   };
   try {
@@ -69,6 +75,10 @@ export async function callGemini(
 
   const parts = json.candidates?.[0]?.content?.parts ?? [];
   const text = parts.map((p) => p.text ?? "").join("");
+  // A prompt blocked before generation (e.g. safety) comes back with no
+  // candidates at all and the reason on promptFeedback instead of a
+  // per-candidate finishReason — check both.
+  const finishReason = json.candidates?.[0]?.finishReason ?? json.promptFeedback?.blockReason ?? null;
 
   return {
     text,
@@ -77,5 +87,7 @@ export async function callGemini(
       inputTokens: json.usageMetadata?.promptTokenCount ?? 0,
       outputTokens: json.usageMetadata?.candidatesTokenCount ?? 0,
     },
+    modelReturned: json.modelVersion ?? null,
+    finishReason,
   };
 }

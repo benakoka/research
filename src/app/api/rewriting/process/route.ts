@@ -33,6 +33,13 @@ interface ProcessBody {
   promptTemplate: string;
   retryThresholdFraction: number;
   retryThresholdEnabled: boolean;
+  // §5's explicit retry budgets and §6's per-model temperature — stateless
+  // like everything else here, so the client (which reads Settings) sends
+  // them on every call rather than the route reading them from anywhere.
+  apiErrorRetryLimit: number;
+  refusalEmptyRetryLimit: number;
+  gptTemperature: number;
+  geminiTemperature: number;
 }
 
 export const POST = withApiErrorHandling(async (req: NextRequest) => {
@@ -51,16 +58,26 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
 
   const updatedChains = await Promise.all(
     runnable.map(async ({ chain, genIndex }) => {
-      const generation = await executeGeneration(
+      const temperature = chain.model === "GPT" ? body.gptTemperature : body.geminiTemperature;
+      const { generation, newAttempts } = await executeGeneration(
         body.promptTemplate,
         body.retryThresholdFraction,
         body.retryThresholdEnabled,
+        body.apiErrorRetryLimit,
+        body.refusalEmptyRetryLimit,
+        temperature,
         chain,
-        genIndex
+        genIndex,
+        req.signal
       );
       const generations = [...chain.generations];
       generations[genIndex] = generation;
-      return { ...chain, generations };
+      return {
+        ...chain,
+        generations,
+        attemptLog: [...chain.attemptLog, ...newAttempts],
+        failedAtGeneration: generation.status === "error" ? genIndex : null,
+      };
     })
   );
 

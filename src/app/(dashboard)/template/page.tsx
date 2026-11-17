@@ -20,6 +20,8 @@ export default async function TemplatePreviewPage() {
 
   const headers: (keyof (typeof vignettes.rows)[number])[] = [
     "vignette_id",
+    "base_vignette_id",
+    "scenario",
     "domain",
     "valence",
     "scenario_number",
@@ -29,6 +31,7 @@ export default async function TemplatePreviewPage() {
     "female_name",
     "male_name",
     "vignette_text",
+    "word_count",
   ];
 
   return (
@@ -82,9 +85,9 @@ export default async function TemplatePreviewPage() {
         <h2 className="mb-1 font-semibold text-slate-900">Vignettes tab</h2>
         <p className="mb-4 text-xs text-slate-500">
           {vignettes.rows.length} row(s) shown below (formula-computed{" "}
-          <code>vignette_id</code> values). <code>domain</code>,{" "}
-          <code>valence</code>, and <code>order_variant</code> are
-          dropdown-restricted in the real file.
+          <code>vignette_id</code> and <code>base_vignette_id</code> values).{" "}
+          <code>domain</code>, <code>valence</code>, and{" "}
+          <code>order_variant</code> are dropdown-restricted in the real file.
         </p>
         <div className="overflow-auto rounded-lg border border-slate-200">
           <table className="w-full text-left text-xs">

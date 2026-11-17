@@ -3,6 +3,8 @@ import { Domain, Valence, OrderVariant, VignetteRow } from "./types";
 
 const REQUIRED_HEADERS = [
   "vignette_id",
+  "base_vignette_id",
+  "scenario",
   "domain",
   "valence",
   "scenario_number",
@@ -12,6 +14,7 @@ const REQUIRED_HEADERS = [
   "female_name",
   "male_name",
   "vignette_text",
+  "word_count",
 ] as const;
 
 const VALID_DOMAINS = new Set<Domain>(["leadership", "brilliance", "rationality"]);
@@ -141,11 +144,14 @@ export async function parseVignetteWorkbook(buffer: ArrayBuffer): Promise<Parsed
       );
     }
 
+    const base_vignette_id = get("base_vignette_id");
+    const scenario = get("scenario");
     const actor_first_name = get("actor_first_name");
     const actor_second_name = get("actor_second_name");
     const female_name = get("female_name");
     const male_name = get("male_name");
     const vignette_text = get("vignette_text");
+    const wordCountRaw = get("word_count");
     // Optional, not in REQUIRED_HEADERS — most uploads won't have this
     // column at all (headerToCol simply won't have "name_race"), so this
     // reads "" rather than throwing, same as any other missing optional
@@ -153,6 +159,9 @@ export async function parseVignetteWorkbook(buffer: ArrayBuffer): Promise<Parsed
     const nameRaceCol = headerToCol.get("name_race");
     const name_race = nameRaceCol ? cellText(row.getCell(nameRaceCol).value).trim() : "";
 
+    if (!base_vignette_id) {
+      throw new VignetteParseError(`Row ${r} (${vignette_id}): base_vignette_id is empty.`);
+    }
     if (!female_name || !male_name) {
       throw new VignetteParseError(
         `Row ${r} (${vignette_id}): female_name and male_name must both be set.`
@@ -160,6 +169,23 @@ export async function parseVignetteWorkbook(buffer: ArrayBuffer): Promise<Parsed
     }
     if (!vignette_text) {
       throw new VignetteParseError(`Row ${r} (${vignette_id}): vignette_text is empty.`);
+    }
+    const word_count = Number(wordCountRaw);
+    if (!Number.isFinite(word_count)) {
+      throw new VignetteParseError(
+        `Row ${r} (${vignette_id}): word_count "${wordCountRaw}" is not a number.`
+      );
+    }
+    // Both characters' names have to actually appear in their own seed
+    // text — not a formality: Rewriting's own refusal/empty detection
+    // (lib/textChecks.ts) relies on these exact two strings being the
+    // literal names used in the text, so a seed row where that's already
+    // false would make every downstream generation's both_names_present
+    // check meaningless for this row.
+    if (!vignette_text.includes(actor_first_name) || !vignette_text.includes(actor_second_name)) {
+      throw new VignetteParseError(
+        `Row ${r} (${vignette_id}): vignette_text doesn't contain both actor_first_name ("${actor_first_name}") and actor_second_name ("${actor_second_name}").`
+      );
     }
 
     if (seenIds.has(vignette_id)) {
@@ -171,6 +197,8 @@ export async function parseVignetteWorkbook(buffer: ArrayBuffer): Promise<Parsed
 
     rows.push({
       vignette_id,
+      base_vignette_id,
+      scenario,
       domain: domainRaw,
       valence: valenceRaw,
       scenario_number,
@@ -181,25 +209,12 @@ export async function parseVignetteWorkbook(buffer: ArrayBuffer): Promise<Parsed
       male_name,
       vignette_text,
       name_race,
+      word_count,
     });
   }
 
   if (rows.length === 0) {
     throw new VignetteParseError("No data rows found in the Vignettes sheet.");
-  }
-
-  // Soft check: rows should come in A/B pairs sharing domain+valence+scenario_number.
-  const pairKey = (row: VignetteRow) => `${row.domain}::${row.valence}::${row.scenario_number}`;
-  const pairCounts = new Map<string, number>();
-  for (const row of rows) {
-    pairCounts.set(pairKey(row), (pairCounts.get(pairKey(row)) ?? 0) + 1);
-  }
-  for (const [key, count] of pairCounts) {
-    if (count !== 2) {
-      warnings.push(
-        `Scenario "${key}" has ${count} row(s), expected 2 (an A/B pair). Check the upload.`
-      );
-    }
   }
 
   return { rows, warnings };

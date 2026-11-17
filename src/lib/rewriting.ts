@@ -84,6 +84,9 @@ export function buildRewritingChains(
       chains.push({
         id: chainId,
         vignette_id: row.vignette_id,
+        base_vignette_id: row.base_vignette_id,
+        scenario: row.scenario,
+        word_count: row.word_count,
         domain: row.domain,
         valence: row.valence,
         scenario_number: row.scenario_number,
@@ -101,6 +104,8 @@ export function buildRewritingChains(
           ...targets.map((t, i) => pendingGeneration(i + 1, t)),
         ],
         status: "pending",
+        attemptLog: [],
+        failedAtGeneration: null,
       });
     }
   }

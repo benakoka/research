@@ -52,6 +52,12 @@ function clampPositiveInt(raw: string, fallback = 1): number {
   return Number.isFinite(n) && n >= 1 ? n : fallback;
 }
 
+/** Temperature is a 0-2 float for both providers' APIs — not a whole number like the counts above. */
+function clampTemperature(raw: string, fallback: number): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 && n <= 2 ? n : fallback;
+}
+
 const inputClass =
   "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500";
 
@@ -76,6 +82,10 @@ export default function SettingsPage() {
   const [repCountRaw, setRepCountRaw] = useState<string | null>(null);
   const [wordCountRaw, setWordCountRaw] = useState<(string | null)[]>([null, null, null, null, null]);
   const [retryThresholdRaw, setRetryThresholdRaw] = useState<string | null>(null);
+  const [gptTemperatureRaw, setGptTemperatureRaw] = useState<string | null>(null);
+  const [geminiTemperatureRaw, setGeminiTemperatureRaw] = useState<string | null>(null);
+  const [apiErrorRetryLimitRaw, setApiErrorRetryLimitRaw] = useState<string | null>(null);
+  const [refusalEmptyRetryLimitRaw, setRefusalEmptyRetryLimitRaw] = useState<string | null>(null);
 
   async function copySuggestedModel() {
     await navigator.clipboard.writeText(SUGGESTED_TEST_MODEL);
@@ -241,6 +251,28 @@ export default function SettingsPage() {
               className={inputClass + " font-mono"}
             />
           </Field>
+          <Field
+            label="GPT temperature"
+            htmlFor="gpt-temperature"
+            hint="Sent explicitly with every GPT rewriting call (§6). 0-2, provider default is 1."
+          >
+            <input
+              id="gpt-temperature"
+              aria-describedby="gpt-temperature-hint"
+              type="number"
+              min={0}
+              max={2}
+              step={0.1}
+              value={gptTemperatureRaw ?? String(data.gptTemperature)}
+              onChange={(e) => setGptTemperatureRaw(e.target.value)}
+              onBlur={() => {
+                if (gptTemperatureRaw === null) return;
+                update("gptTemperature", clampTemperature(gptTemperatureRaw, data.gptTemperature));
+                setGptTemperatureRaw(null);
+              }}
+              className={inputClass + " max-w-[8rem]"}
+            />
+          </Field>
         </div>
         <div className={data.enabledModels.Gemini ? undefined : "opacity-50"}>
           <label className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -265,6 +297,28 @@ export default function SettingsPage() {
               value={data.geminiModelSnapshot}
               onChange={(e) => update("geminiModelSnapshot", e.target.value)}
               className={inputClass + " font-mono"}
+            />
+          </Field>
+          <Field
+            label="Gemini temperature"
+            htmlFor="gemini-temperature"
+            hint="Sent explicitly with every Gemini rewriting call (§6). 0-2, provider default is around 1."
+          >
+            <input
+              id="gemini-temperature"
+              aria-describedby="gemini-temperature-hint"
+              type="number"
+              min={0}
+              max={2}
+              step={0.1}
+              value={geminiTemperatureRaw ?? String(data.geminiTemperature)}
+              onChange={(e) => setGeminiTemperatureRaw(e.target.value)}
+              onBlur={() => {
+                if (geminiTemperatureRaw === null) return;
+                update("geminiTemperature", clampTemperature(geminiTemperatureRaw, data.geminiTemperature));
+                setGeminiTemperatureRaw(null);
+              }}
+              className={inputClass + " max-w-[8rem]"}
             />
           </Field>
         </div>
@@ -438,6 +492,57 @@ export default function SettingsPage() {
             </div>
           </div>
         </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field
+            label="API-error retry limit"
+            htmlFor="api-error-retry-limit"
+            hint="Automatic retries with backoff on an HTTP/network/timeout/rate-limit failure (§5). Identical prompt/input every time."
+          >
+            <input
+              id="api-error-retry-limit"
+              aria-describedby="api-error-retry-limit-hint"
+              type="number"
+              min={1}
+              step={1}
+              value={apiErrorRetryLimitRaw ?? String(data.apiErrorRetryLimit)}
+              onChange={(e) => setApiErrorRetryLimitRaw(e.target.value)}
+              onBlur={() => {
+                if (apiErrorRetryLimitRaw === null) return;
+                update("apiErrorRetryLimit", clampPositiveInt(apiErrorRetryLimitRaw, data.apiErrorRetryLimit));
+                setApiErrorRetryLimitRaw(null);
+              }}
+              className={inputClass + " max-w-[8rem]"}
+            />
+          </Field>
+          <Field
+            label="Refusal/empty retry limit"
+            htmlFor="refusal-empty-retry-limit"
+            hint="Retries, identical prompt/input, when the model refuses or returns nothing instead of erroring (§5)."
+          >
+            <input
+              id="refusal-empty-retry-limit"
+              aria-describedby="refusal-empty-retry-limit-hint"
+              type="number"
+              min={1}
+              step={1}
+              value={refusalEmptyRetryLimitRaw ?? String(data.refusalEmptyRetryLimit)}
+              onChange={(e) => setRefusalEmptyRetryLimitRaw(e.target.value)}
+              onBlur={() => {
+                if (refusalEmptyRetryLimitRaw === null) return;
+                update(
+                  "refusalEmptyRetryLimit",
+                  clampPositiveInt(refusalEmptyRetryLimitRaw, data.refusalEmptyRetryLimit)
+                );
+                setRefusalEmptyRetryLimitRaw(null);
+              }}
+              className={inputClass + " max-w-[8rem]"}
+            />
+          </Field>
+        </div>
+        <p className="mt-1 text-xs text-slate-400">
+          If every attempt under the relevant budget fails, that generation (and the rest of its chain) is marked
+          failed — generations are never skipped.
+        </p>
       </section>
 
       {error && <p className="text-sm text-red-600">{error}</p>}

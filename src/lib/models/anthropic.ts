@@ -12,6 +12,7 @@ export async function callAnthropic(
   apiKey: string,
   modelSnapshot: string,
   prompt: string,
+  temperature?: number,
   signal?: AbortSignal
 ): Promise<ModelCallResult> {
   let res: Response;
@@ -25,11 +26,13 @@ export async function callAnthropic(
           "x-api-key": apiKey,
           "anthropic-version": "2023-06-01",
         },
-        // No temperature/sampling override — leave at the provider's default (§2).
+        // temperature sent only when the caller passes one explicitly — see
+        // openai.ts's matching comment.
         body: JSON.stringify({
           model: modelSnapshot,
           max_tokens: 1024,
           messages: [{ role: "user", content: prompt }],
+          ...(temperature !== undefined ? { temperature } : {}),
         }),
       },
       undefined,
@@ -60,6 +63,8 @@ export async function callAnthropic(
   }
 
   let json: {
+    model?: string;
+    stop_reason?: string;
     content?: { type?: string; text?: string }[];
     usage?: { input_tokens?: number; output_tokens?: number };
   };
@@ -81,5 +86,7 @@ export async function callAnthropic(
       inputTokens: json.usage?.input_tokens ?? 0,
       outputTokens: json.usage?.output_tokens ?? 0,
     },
+    modelReturned: json.model ?? null,
+    finishReason: json.stop_reason ?? null,
   };
 }

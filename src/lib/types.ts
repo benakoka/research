@@ -40,6 +40,26 @@ export interface Settings {
   // generation's first attempt is always accepted, regardless of how far it
   // misses its word-count target — no retrying on word count at all.
   retryThresholdEnabled: boolean;
+
+  // Generation parameters sent explicitly to each model's API (§6) —
+  // previously neither provider call sent a temperature at all, leaving it
+  // at whatever the provider's own default is. Free-form per-model so GPT
+  // and Gemini can be tuned independently; no study-mandated default, so
+  // these just start at each API's own baseline (1.0).
+  gptTemperature: number;
+  geminiTemperature: number;
+
+  // Rewriting retry budgets (§5), explicit and adjustable rather than
+  // hardcoded — separate from retryThresholdFraction/Enabled above, which
+  // governs *word-count* ("off_target") retries only:
+  //   - apiErrorRetryLimit: automatic retries (with backoff) on an HTTP/
+  //     network/timeout/rate-limit failure.
+  //   - refusalEmptyRetryLimit: retries (identical prompt/input, no backoff)
+  //     when the model refuses/returns an empty response instead of erroring.
+  // Exhausting either budget marks that generation (and the rest of its
+  // chain) "error" — see RewritingChain.failedAtGeneration.
+  apiErrorRetryLimit: number;
+  refusalEmptyRetryLimit: number;
 }
 
 // The opening question (§3) now varies by domain/valence — see
@@ -65,6 +85,10 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultWordCountTargets: [49, 40, 33, 27, 22],
   retryThresholdFraction: 0.1,
   retryThresholdEnabled: true,
+  gptTemperature: 1,
+  geminiTemperature: 1,
+  apiErrorRetryLimit: 5,
+  refusalEmptyRetryLimit: 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -77,6 +101,15 @@ export type OrderVariant = "A" | "B";
 
 export interface VignetteRow {
   vignette_id: string;
+  // The 108-row main-study file is 18 base vignettes × 3 name sets × A/B —
+  // base_vignette_id is the shared id across all 6 rows of one base
+  // vignette (e.g. "Leadership-Credit-Scenario 1"), distinct from
+  // vignette_id (unique per row). Required column — every row must have
+  // one, used to group a base vignette's name-set/order-variant siblings.
+  base_vignette_id: string;
+  // Short descriptive label for the scenario (e.g. "consulting pitch") —
+  // informational only, carried straight through to every output row.
+  scenario: string;
   domain: Domain;
   valence: Valence;
   scenario_number: number;
@@ -86,11 +119,11 @@ export interface VignetteRow {
   female_name: string;
   male_name: string;
   vignette_text: string;
-  // Optional — not in REQUIRED_HEADERS, so most uploads simply won't have
-  // this column and it stays "". Carried through only so the Attribution
-  // analysis-dataset CSV export (lib/export/attributionAnalysisCsv.ts) can
-  // populate its own name_race column; nothing else in the app reads it.
   name_race: string;
+  // The seed text's own word count, as declared by the upload — not
+  // recomputed/validated against vignette_text, just carried through to
+  // every output row (success CSV) as reference metadata.
+  word_count: number;
 }
 
 export interface VignetteSet {
@@ -190,6 +223,9 @@ export interface RewritingGeneration {
 export interface RewritingChain {
   id: string; // stable chain_id, assigned at creation, never reused/regenerated
   vignette_id: string;
+  base_vignette_id: string;
+  scenario: string;
+  word_count: number;
   domain: Domain;
   valence: Valence;
   scenario_number: number;
@@ -213,6 +249,64 @@ export interface RewritingChain {
   wordCountTargets: [number, number, number, number, number];
   generations: RewritingGeneration[]; // length 6, index 0 = seed
   status: CellStatus;
+  // Every API call ever made for this chain, across every generation —
+  // appended to, never pruned (even a manual per-generation retry keeps the
+  // earlier attempts here; this is an audit trail, not current-state).
+  // See RewriteAttemptLog below.
+  attemptLog: RewriteAttemptLog[];
+  // Set to the 1-5 generation index that exhausted its retry budgets
+  // (api_error and/or refusal/empty) without ever succeeding — "failed at
+  // generation g," per §5. null while the chain hasn't hit that; cleared
+  // back to null if a manual retry on that generation succeeds. A failed
+  // generation blocks nextRunnableGenerationIndex from ever advancing past
+  // it, so the rest of the chain is never silently skipped.
+  failedAtGeneration: number | null;
+}
+
+// One row per API call Rewriting makes (§3) — logged separately from the
+// chain's actual output text (RewritingGeneration.text/attempts), so every
+// attempt is visible even when it never produced usable output. parent_
+// attempt_id chains an attempt back to the one it's retrying (null for the
+// first attempt at a given generation), so the full retry history for one
+// generation can be reconstructed even though attempts from unrelated
+// chains/generations are interleaved in the flat export.
+export type RewriteOutcome = "success" | "refusal" | "api_error" | "empty" | "off_target";
+
+export interface RewriteAttemptLog {
+  attempt_id: string;
+  chain_id: string;
+  vignette_id: string;
+  base_vignette_id: string;
+  name_race: string;
+  order_variant: OrderVariant;
+  model_requested: ModelProvider;
+  // The model/version string the API itself reports back (OpenAI's `model`,
+  // Gemini's `modelVersion`) — null when the call never got a response at
+  // all (api_error) to read one from.
+  model_returned: string | null;
+  temperature: number;
+  generation: number; // 1-5 (seed, generation 0, never calls a model)
+  attempt_number: number; // 1-based, within this generation's whole retry history
+  parent_attempt_id: string | null;
+  target_words: number;
+  output_words: number; // 0 for api_error/empty
+  word_diff: number; // abs(output_words - target_words) — always computed, even with the retry-threshold toggle off
+  outcome: RewriteOutcome;
+  // The API's own finish/block reason when it returned one (OpenAI
+  // finish_reason, Gemini finishReason/promptFeedback.blockReason) — null
+  // for api_error (no response to read it from) or if the provider didn't
+  // report one.
+  finish_reason: string | null;
+  error_message: string | null;
+  timestamp: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  both_names_present: boolean;
+  // Additive, beyond the core schema above — kept because a refusal/
+  // api_error log entry is far less useful for diagnosing *why* without the
+  // actual text the model returned (or the full raw response body).
+  output_text: string;
+  raw_response: string | null;
 }
 
 export interface RewritingRun {
@@ -226,12 +320,18 @@ export interface RewritingRun {
   vignetteSetFilename: string;
   // Inline, same reasoning as AttributionRun.cells above.
   chains: RewritingChain[];
-  // "cancelled": the user stopped the run mid-flight (Cancel button). Cells
-  // that hadn't been sent yet stay "pending" — cancelling doesn't discard
-  // anything already completed, and the run can still be exported as-is.
-  // Distinct from "pending"/"running" specifically so a page refresh
-  // doesn't auto-resume a run the user deliberately stopped. (Attribution's
-  // equivalent is "paused" — Attribution's Cancel became a resumable Pause,
-  // Rewriting's has not.)
-  status: "pending" | "running" | "done" | "cancelled";
+  // Which uploaded vignette rows this run actually used — set once at
+  // start (lib/rewriting.ts's buildRewritingChains runs only over the
+  // selected rows), kept for display/reference. Run controls (§8) let the
+  // user pick a subset (e.g. a 6-row dry run) rather than always the whole
+  // upload.
+  selectedVignetteIds: string[];
+  // "paused": the user stopped the run mid-flight (Pause button). Chains
+  // that hadn't been sent yet stay "pending" — pausing doesn't discard
+  // anything already completed (or already pending), and clicking Resume
+  // hands the run straight back to driveRun to pick up exactly where it
+  // left off (§8) — including across a page reload, which auto-resumes
+  // anything not deliberately paused. Distinct from "pending"/"running" so
+  // a refresh doesn't auto-resume a run the user deliberately stopped.
+  status: "pending" | "running" | "done" | "paused";
 }

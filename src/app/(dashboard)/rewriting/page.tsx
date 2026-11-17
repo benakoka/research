@@ -8,6 +8,7 @@ import {
   getRewritingRun,
   saveRewritingRun,
   clearRewritingRun,
+  estimateLocalStorageUsageFraction,
 } from "@/lib/clientStorage";
 import { RewritingChain, RewritingRun, VignetteSet } from "@/lib/types";
 import { EtaSample, estimateEtaSeconds, formatEta, pushEtaSample } from "@/lib/eta";
@@ -32,6 +33,15 @@ const BATCH_SIZE = 4;
 // one does.
 const WORKER_COUNT = 3;
 
+type ExportFormat = "long" | "wide" | "vignettes" | "attempt_log";
+
+const EXPORT_FILENAMES: Record<ExportFormat, string> = {
+  long: "rewriting_successful_outputs.csv",
+  wide: "rewriting_wide.xlsx",
+  vignettes: "rewriting_as_vignettes.xlsx",
+  attempt_log: "rewriting_attempt_log.csv",
+};
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -41,6 +51,19 @@ function downloadBlob(blob: Blob, filename: string) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+async function fetchExport(chains: RewritingChain[], format: ExportFormat): Promise<Blob> {
+  const res = await fetch("/api/rewriting/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chains, format }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? "Export failed.");
+  }
+  return res.blob();
 }
 
 function overallStats(chains: RewritingChain[]) {
@@ -53,33 +76,52 @@ function overallStats(chains: RewritingChain[]) {
   return { total, done, error, running, pending };
 }
 
+function dryRunSixIds(rows: VignetteSet["rows"]): Set<string> {
+  const seenCombo = new Set<string>();
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const key = `${row.domain}::${row.valence}`;
+    if (!seenCombo.has(key)) {
+      seenCombo.add(key);
+      ids.add(row.vignette_id);
+    }
+  }
+  return ids;
+}
+
 export default function RewritingPage() {
   const [vignetteSet, setVignetteSet] = useState<VignetteSet | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [rowsExpanded, setRowsExpanded] = useState(false);
   const [run, setRun] = useState<RewritingRun | null>(null);
   const [starting, setStarting] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [exporting, setExporting] = useState<"long" | "wide" | "vignettes" | null>(null);
+  const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Separate from `error` (which is transient, about the last batch/export
   // action) — this one persists across renders once set, because it means
   // this browser has silently stopped being able to save the run at all
-  // (most likely localStorage quota exceeded). The run keeps going in
-  // memory either way, but "closing the tab loses nothing" is no longer
-  // true once this is set, so it needs to stay visible until the user
-  // exports (or dismisses it deliberately), not just flash by.
+  // (most likely localStorage quota exceeded), or is close to that point.
+  // The run keeps going in memory either way, but "closing the tab loses
+  // nothing" is no longer true once this is set, so it needs to stay
+  // visible until the user exports (or dismisses it deliberately), not
+  // just flash by.
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const runningRef = useRef(false);
   // Checked at the top of every worker loop iteration (between batches) so
-  // Cancel takes effect even if a batch happens to already be in flight when
+  // Pause takes effect even if a batch happens to already be in flight when
   // it's clicked. abortControllersRef additionally kills every batch
-  // request actually in flight right now, so Cancel doesn't have to wait
-  // out a slow/retrying batch (up to ~a minute with the model-call retry
-  // policy) before doing anything.
-  const cancelRequestedRef = useRef(false);
+  // request actually in flight right now (which the server forwards into
+  // the actual provider call — see /api/rewriting/process's req.signal),
+  // so Pause doesn't have to wait out a slow/retrying batch before doing
+  // anything, and doesn't leave orphaned provider calls running unseen in
+  // the background for generations the client has already put back to
+  // "pending".
+  const pauseRequestedRef = useRef(false);
   // A Set instead of a single ref now that multiple batch requests can be
-  // in flight at once (see WORKER_COUNT) — Cancel needs to abort all of
+  // in flight at once (see WORKER_COUNT) — Pause needs to abort all of
   // them, not just the most recent one.
   const abortControllersRef = useRef<Set<AbortController>>(new Set());
   // Throughput history for the "estimated time remaining" display — see
@@ -101,6 +143,52 @@ export default function RewritingPage() {
       setStorageWarning(
         "This browser's storage is full, so new results are no longer being saved — they only exist in this tab until you export. Export now, or free up space (clear old runs/other sites' data) and reload to resume normal saving."
       );
+      return;
+    }
+    // Proactive — fires *before* an actual write failure, unlike the branch
+    // above. estimateLocalStorageUsageFraction is a heuristic (localStorage
+    // quotas vary by browser and aren't queryable directly), so this errs
+    // toward warning early rather than precisely.
+    const frac = estimateLocalStorageUsageFraction();
+    if (frac >= 0.8) {
+      setStorageWarning(
+        `This browser's local storage is at roughly ${Math.round(frac * 100)}% of an assumed ~5MB per-origin limit — export soon, or it may silently stop saving new results.`
+      );
+    }
+  }
+
+  async function downloadExport(chains: RewritingChain[], format: ExportFormat) {
+    const blob = await fetchExport(chains, format);
+    downloadBlob(blob, EXPORT_FILENAMES[format]);
+  }
+
+  async function exportRun(format: ExportFormat) {
+    if (!run) return;
+    setExporting(format);
+    setError(null);
+    try {
+      await downloadExport(run.chains, format);
+      // A successful export is a durable copy outside this browser's
+      // storage, so whatever the local-save situation is no longer matters
+      // for anything already in the file.
+      setStorageWarning(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Export failed.");
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  // §7: both the successful-outputs CSV and the full attempt log
+  // auto-download the moment a run actually finishes (not on every resume
+  // of an already-finished run — driveRun is never re-invoked for one, see
+  // the mount effect below).
+  async function autoExportOnFinish(chains: RewritingChain[]) {
+    try {
+      await Promise.all([downloadExport(chains, "long"), downloadExport(chains, "attempt_log")]);
+      setStorageWarning(null);
+    } catch (err) {
+      setError(err instanceof Error ? `Auto-export on finish failed: ${err.message}` : "Auto-export on finish failed.");
     }
   }
 
@@ -109,12 +197,25 @@ export default function RewritingPage() {
     promptTemplate: string,
     retryThresholdFraction: number,
     retryThresholdEnabled: boolean,
+    apiErrorRetryLimit: number,
+    refusalEmptyRetryLimit: number,
+    gptTemperature: number,
+    geminiTemperature: number,
     signal?: AbortSignal
   ) {
     const res = await fetch("/api/rewriting/process", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chains, promptTemplate, retryThresholdFraction, retryThresholdEnabled }),
+      body: JSON.stringify({
+        chains,
+        promptTemplate,
+        retryThresholdFraction,
+        retryThresholdEnabled,
+        apiErrorRetryLimit,
+        refusalEmptyRetryLimit,
+        gptTemperature,
+        geminiTemperature,
+      }),
       signal,
     });
     const body = await res.json();
@@ -127,7 +228,8 @@ export default function RewritingPage() {
     runningRef.current = true;
     setProcessing(true);
     setError(null);
-    cancelRequestedRef.current = false;
+    pauseRequestedRef.current = false;
+    const settings = getSettings();
     // Seed with "now, at whatever's already done" — matters for a resumed
     // run (page refresh mid-run) and for a retry cascade kicked off from an
     // otherwise-finished run, where generations completed before this call
@@ -151,7 +253,7 @@ export default function RewritingPage() {
 
     async function worker() {
       while (true) {
-        if (cancelRequestedRef.current || fatalError) return;
+        if (pauseRequestedRef.current || fatalError) return;
         const claim = working.chains
           .map((chain) => ({ chain, genIndex: nextRunnableGenerationIndex(chain) }))
           .filter((x): x is { chain: RewritingChain; genIndex: number } => x.genIndex !== null)
@@ -179,15 +281,19 @@ export default function RewritingPage() {
             working.promptTemplate,
             working.retryThresholdFraction,
             working.retryThresholdEnabled,
+            settings.apiErrorRetryLimit,
+            settings.refusalEmptyRetryLimit,
+            settings.gptTemperature,
+            settings.geminiTemperature,
             controller.signal
           );
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") return;
-          // A genuine failure (not a user-requested cancel) should stop the
+          // A genuine failure (not a user-requested pause) should stop the
           // whole run, not just this worker — record it and tell the other
-          // workers to wind down too, same as a cancel would.
+          // workers to wind down too, same as a pause would.
           fatalError = err;
-          cancelRequestedRef.current = true;
+          pauseRequestedRef.current = true;
           for (const c of abortControllersRef.current) c.abort();
           return;
         } finally {
@@ -206,7 +312,7 @@ export default function RewritingPage() {
 
     try {
       await Promise.all(Array.from({ length: WORKER_COUNT }, () => worker()));
-      if (cancelRequestedRef.current && !fatalError) {
+      if (pauseRequestedRef.current && !fatalError) {
         // Any generation a worker claimed (marked "running") but never got
         // a response for — because its request was aborted mid-flight —
         // needs to go back to "pending", the same convention used on
@@ -216,11 +322,12 @@ export default function RewritingPage() {
           ...c,
           generations: c.generations.map((g) => (g.status === "running" ? { ...g, status: "pending" as const } : g)),
         }));
-        persist({ ...working, chains, status: "cancelled" });
+        persist({ ...working, chains, status: "paused" });
         return;
       }
       if (fatalError) throw fatalError;
       persist({ ...working, status: "done" });
+      await autoExportOnFinish(working.chains);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Batch failed.");
     } finally {
@@ -230,15 +337,18 @@ export default function RewritingPage() {
     }
   }
 
-  function cancelRun() {
-    if (
-      !confirm(
-        "Cancel this run? Whatever's already completed stays — you can export it — but nothing still pending will be sent."
-      )
-    )
-      return;
-    cancelRequestedRef.current = true;
+  function pauseRun() {
+    pauseRequestedRef.current = true;
     for (const c of abortControllersRef.current) c.abort();
+  }
+
+  function resumeRun() {
+    if (!run || runningRef.current) return;
+    const chains = run.chains.map((c) => ({
+      ...c,
+      generations: c.generations.map((g) => (g.status === "running" ? { ...g, status: "pending" as const } : g)),
+    }));
+    driveRun({ ...run, chains });
   }
 
   useEffect(() => {
@@ -246,8 +356,8 @@ export default function RewritingPage() {
       const stored = getRewritingRun();
       setRun(stored);
       // Resume automatically if the page was refreshed mid-run — but not a
-      // run the user deliberately cancelled.
-      if (stored && stored.status !== "cancelled") {
+      // run the user deliberately paused.
+      if (stored && stored.status !== "paused") {
         // Any generation left "running" from a torn-down tab needs to go
         // back to pending before we can pick it up again.
         const chains = stored.chains.map((c) => ({
@@ -263,8 +373,31 @@ export default function RewritingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A fresh upload selects every row by default — §8's row-selection is an
+  // opt-out narrowing (e.g. down to a 6-row dry run), not an opt-in. Set
+  // directly from the uploader's onChange (not a useEffect on vignetteSet)
+  // so this doesn't fire as a second, cascading render after the upload.
+  function handleVignetteSetChange(next: VignetteSet | null) {
+    setVignetteSet(next);
+    setSelectedIds(new Set(next ? next.rows.map((r) => r.vignette_id) : []));
+  }
+
+  function toggleRow(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   async function startRun() {
     if (!vignetteSet) return;
+    const rowsToRun = vignetteSet.rows.filter((r) => selectedIds.has(r.vignette_id));
+    if (rowsToRun.length === 0) {
+      setError("Select at least one vignette row to run (see \"Which seed versions to run\" above).");
+      return;
+    }
     if (run && overallStats(run.chains).pending + overallStats(run.chains).running > 0) {
       if (!confirm("There's an unfinished run. Starting a new one replaces it. Continue?")) return;
     }
@@ -277,7 +410,7 @@ export default function RewritingPage() {
         return;
       }
       const chains = buildRewritingChains(
-        vignetteSet.rows,
+        rowsToRun,
         settings.defaultWordCountTargets,
         settings.gptModelSnapshot,
         settings.geminiModelSnapshot,
@@ -292,6 +425,7 @@ export default function RewritingPage() {
         retryThresholdFraction: settings.retryThresholdFraction,
         retryThresholdEnabled: settings.retryThresholdEnabled,
         vignetteSetFilename: vignetteSet.filename,
+        selectedVignetteIds: rowsToRun.map((r) => r.vignette_id),
         chains,
         status: "pending",
       };
@@ -321,7 +455,10 @@ export default function RewritingPage() {
       for (let i = gen + 1; i <= 5; i++) {
         generations[i] = pendingGeneration(i, chain.wordCountTargets[i - 1]);
       }
-      const resetChain = { ...chain, generations };
+      // failedAtGeneration is cleared optimistically — executeGeneration
+      // (via the /process route) sets it right back if this retry fails
+      // again too.
+      const resetChain = { ...chain, generations, failedAtGeneration: null };
       const chains = run.chains.map((c) => (c.id === chainId ? resetChain : c));
       const resetRun = { ...run, chains, status: "running" as const };
       persist(resetRun);
@@ -337,33 +474,6 @@ export default function RewritingPage() {
     }
   }
 
-  async function exportRun(format: "long" | "wide" | "vignettes") {
-    if (!run) return;
-    setExporting(format);
-    setError(null);
-    try {
-      const res = await fetch("/api/rewriting/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chains: run.chains, format }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "Export failed.");
-      }
-      const blob = await res.blob();
-      downloadBlob(blob, `rewriting_${format}.${format === "long" ? "csv" : "xlsx"}`);
-      // A successful export is a durable copy outside this browser's
-      // storage, so whatever the local-save situation is no longer matters
-      // for anything already in the file.
-      setStorageWarning(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Export failed.");
-    } finally {
-      setExporting(null);
-    }
-  }
-
   function startOver() {
     if (!confirm("Discard the current run? This can't be undone unless you've already exported it.")) return;
     clearRewritingRun();
@@ -372,16 +482,17 @@ export default function RewritingPage() {
 
   const progress = run ? overallStats(run.chains) : null;
   const pct = progress && progress.total > 0 ? Math.round(((progress.done + progress.error) / progress.total) * 100) : 0;
+  const failedChains = run ? run.chains.filter((c) => c.failedAtGeneration !== null) : [];
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Rewriting module</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Each row × 2 models = an independent 5-generation transmission
-          chain. Word-count targets and retry threshold come from Settings.
-          Nothing is saved on a server — this run lives in your browser
-          until you export it.
+          Each selected row × enabled model = an independent 5-generation transmission
+          chain. Word-count targets, retry threshold, temperature, and retry budgets come
+          from Settings. Nothing is saved on a server — this run lives in your browser
+          until you export it (both CSVs auto-download when a run finishes).
         </p>
       </div>
 
@@ -402,7 +513,78 @@ export default function RewritingPage() {
 
       <section className="rounded-xl border border-slate-200 bg-white p-6">
         <h2 className="mb-4 font-semibold text-slate-900">Vignette set</h2>
-        <VignetteUploader value={vignetteSet} onChange={setVignetteSet} />
+        <VignetteUploader value={vignetteSet} onChange={handleVignetteSetChange} />
+
+        {vignetteSet && (
+          <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium text-slate-700">
+                Which seed versions to run: {selectedIds.size} of {vignetteSet.rows.length} selected
+                {" "}(→ {selectedIds.size * (Object.values(getSettings().enabledModels).filter(Boolean).length || 1)} chains)
+              </p>
+              <div className="flex flex-wrap gap-3 text-xs">
+                <button
+                  onClick={() => setSelectedIds(dryRunSixIds(vignetteSet.rows))}
+                  className="text-slate-700 underline hover:text-slate-900"
+                >
+                  Dry run: one per domain × valence
+                </button>
+                <button
+                  onClick={() => setSelectedIds(new Set(vignetteSet.rows.map((r) => r.vignette_id)))}
+                  className="text-slate-700 underline hover:text-slate-900"
+                >
+                  Select all
+                </button>
+                <button onClick={() => setSelectedIds(new Set())} className="text-slate-700 underline hover:text-slate-900">
+                  Select none
+                </button>
+                <button
+                  onClick={() => setRowsExpanded((v) => !v)}
+                  className="text-slate-700 underline hover:text-slate-900"
+                >
+                  {rowsExpanded ? "Hide rows" : "Show rows"}
+                </button>
+              </div>
+            </div>
+            {rowsExpanded && (
+              <div className="mt-3 max-h-80 overflow-auto rounded-md border border-slate-200 bg-white">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-100">
+                    <tr>
+                      {["", "vignette_id", "base_vignette_id", "domain", "valence", "name_race", "order_variant"].map(
+                        (h) => (
+                          <th key={h} className="px-2 py-1 font-medium text-slate-600">
+                            {h}
+                          </th>
+                        )
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vignetteSet.rows.map((row) => (
+                      <tr key={row.vignette_id} className="border-t border-slate-100">
+                        <td className="px-2 py-1">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(row.vignette_id)}
+                            onChange={() => toggleRow(row.vignette_id)}
+                          />
+                        </td>
+                        <td className="px-2 py-1 font-mono">{row.vignette_id}</td>
+                        <td className="px-2 py-1 font-mono">{row.base_vignette_id}</td>
+                        <td className="px-2 py-1">{row.domain}</td>
+                        <td className="px-2 py-1">{row.valence}</td>
+                        <td className="px-2 py-1">{row.name_race}</td>
+                        <td className="px-2 py-1">{row.order_variant}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="mt-4 flex items-center gap-3">
           <button
             onClick={startRun}
@@ -426,8 +608,8 @@ export default function RewritingPage() {
             <p className="mb-2 text-sm text-slate-600">
               GPT {run.gptModelSnapshot || "(no snapshot)"} · Gemini{" "}
               {run.geminiModelSnapshot || "(no snapshot)"} · retry threshold{" "}
-              {run.retryThresholdEnabled ? `${Math.round(run.retryThresholdFraction * 100)}%` : "off"} · from{" "}
-              {run.vignetteSetFilename}
+              {run.retryThresholdEnabled ? `${Math.round(run.retryThresholdFraction * 100)}%` : "off"} ·{" "}
+              {run.selectedVignetteIds?.length ?? "?"} seed row(s) · from {run.vignetteSetFilename}
             </p>
             <div className="mb-1 flex justify-between text-sm text-slate-600">
               <span>
@@ -447,25 +629,44 @@ export default function RewritingPage() {
                     ? `estimated time remaining: ~${formatEta(etaSeconds)}`
                     : "estimating time remaining…"}
                 </p>
-                <button onClick={cancelRun} className="text-xs font-medium text-red-600 underline hover:text-red-800">
-                  Cancel
+                <button onClick={pauseRun} className="text-xs font-medium text-red-600 underline hover:text-red-800">
+                  Pause
                 </button>
               </div>
             )}
-            {run.status === "cancelled" && (
-              <p className="mt-1 text-xs text-amber-700">
-                ⚠ Cancelled — {progress.pending} generation{progress.pending === 1 ? "" : "s"} never got sent.
-                Export what you have below, or start a new run (this one will be replaced, not continued).
+            {!processing && run.status === "paused" && (
+              <div className="mt-1 flex items-center gap-2">
+                <p className="text-xs text-amber-700">
+                  ⚠ Paused — {progress.pending} generation{progress.pending === 1 ? "" : "s"} not yet sent.
+                </p>
+                <button onClick={resumeRun} className="text-xs font-medium text-slate-700 underline hover:text-slate-900">
+                  Resume
+                </button>
+              </div>
+            )}
+            {failedChains.length > 0 && (
+              <p className="mt-1 text-xs text-red-700">
+                ⚠ {failedChains.length} chain{failedChains.length === 1 ? "" : "s"} failed — never skipped, just
+                stopped: {failedChains.map((c) => `${c.id} at generation ${c.failedAtGeneration}`).join("; ")}.
               </p>
             )}
 
-            <div className="mt-4 flex gap-3">
+            <div className="mt-4 flex flex-wrap gap-3">
               <button
                 onClick={() => exportRun("long")}
                 disabled={exporting !== null}
+                title="Only generations that actually finished (status done)."
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
-                {exporting === "long" ? "Exporting…" : "Export long CSV"}
+                {exporting === "long" ? "Exporting…" : "Export successful outputs CSV"}
+              </button>
+              <button
+                onClick={() => exportRun("attempt_log")}
+                disabled={exporting !== null}
+                title="Every API call made, successful or not — one row per attempt."
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {exporting === "attempt_log" ? "Exporting…" : "Export attempt log CSV"}
               </button>
               <button
                 onClick={() => exportRun("wide")}
@@ -522,7 +723,7 @@ export default function RewritingPage() {
                                 {gen.attempts.length > 1 && (
                                   <span
                                     className="ml-1 text-slate-400"
-                                    title={`Complied after ${gen.attempts.length} attempts — each retry re-read the same source text, not its own prior attempt.`}
+                                    title={`Complied after ${gen.attempts.length} attempts — see the attempt log export for the full per-attempt history.`}
                                   >
                                     ({gen.attempts.length}×)
                                   </span>
@@ -593,8 +794,9 @@ export default function RewritingPage() {
           <p className="text-xs text-slate-500">
             (N×) = this generation missed its word-count target and was retried N−1 times — always
             re-reading the same source text, never its own prior attempt — before complying. A
-            generation that never complies within 10 attempts shows as an error instead, blocking
-            the rest of that chain.
+            generation that exhausts any retry budget (word-count, API error, or refusal/empty —
+            see Settings) shows as an error instead, and marks the whole chain failed at that
+            generation; nothing later in that chain is ever run.
           </p>
         </>
       )}

@@ -6,6 +6,7 @@ export async function callOpenAI(
   apiKey: string,
   modelSnapshot: string,
   prompt: string,
+  temperature?: number,
   signal?: AbortSignal
 ): Promise<ModelCallResult> {
   let res: Response;
@@ -18,10 +19,13 @@ export async function callOpenAI(
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
-        // No temperature/sampling override — leave at the provider's default (§2).
+        // temperature is sent only when the caller passes one explicitly
+        // (Rewriting, from Settings per §6) — omitted entirely otherwise
+        // (Attribution), leaving the provider's own default untouched.
         body: JSON.stringify({
           model: modelSnapshot,
           messages: [{ role: "user", content: prompt }],
+          ...(temperature !== undefined ? { temperature } : {}),
         }),
       },
       undefined,
@@ -52,7 +56,8 @@ export async function callOpenAI(
   }
 
   let json: {
-    choices?: { message?: { content?: string } }[];
+    model?: string;
+    choices?: { message?: { content?: string }; finish_reason?: string }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number };
   };
   try {
@@ -69,5 +74,7 @@ export async function callOpenAI(
       inputTokens: json.usage?.prompt_tokens ?? 0,
       outputTokens: json.usage?.completion_tokens ?? 0,
     },
+    modelReturned: json.model ?? null,
+    finishReason: json.choices?.[0]?.finish_reason ?? null,
   };
 }

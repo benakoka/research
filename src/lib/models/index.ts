@@ -54,6 +54,50 @@ function backoffDelayMs(attempt: number): number {
 }
 
 /**
+ * A single provider call, no retry loop — the shared dispatch (test mode /
+ * GPT / Gemini routing, key/snapshot validation) that both `callModel`
+ * (Attribution's own retry loop, below) and Rewriting's executeGeneration
+ * (lib/rewritingExec.ts, which implements its own separate per-outcome
+ * retry budgets per §5 — api_error vs refusal/empty — and needs visibility
+ * into every individual attempt to log it) build on. `temperature` is
+ * optional and omitted entirely when not passed, so a caller that never
+ * sets it (Attribution) gets byte-for-byte the same request body as before
+ * this parameter existed.
+ */
+export async function callModelOnce(
+  provider: ModelProvider,
+  apiKey: string,
+  modelSnapshot: string,
+  prompt: string,
+  temperature?: number,
+  signal?: AbortSignal
+): Promise<ModelCallResult> {
+  if (!apiKey) {
+    throw new ModelCallError(
+      `No ${provider} API key configured. Add one in Settings.`,
+      false
+    );
+  }
+  if (!modelSnapshot) {
+    throw new ModelCallError(
+      `No ${provider} model snapshot configured. Add one in Settings.`,
+      false
+    );
+  }
+  // TEST MODE: a provider in test mode routes through Claude on the
+  // Anthropic key instead of its own, so that slot's pipeline can be
+  // exercised before its real budget exists — independently of whether
+  // the other slot already has a real key (see lib/apiKeys.ts). Taking a
+  // slot out of test mode (its own USE_CLAUDE_FOR_TESTING case) restores
+  // normal dispatch for it with no other code changes needed.
+  return isTestMode(provider)
+    ? await callAnthropic(apiKey, modelSnapshot, prompt, temperature, signal)
+    : provider === "GPT"
+      ? await callOpenAI(apiKey, modelSnapshot, prompt, temperature, signal)
+      : await callGemini(apiKey, modelSnapshot, prompt, temperature, signal);
+}
+
+/**
  * Calls the given model provider with retry + jittered exponential backoff
  * on rate-limit/5xx errors (§5) — including Gemini's "model is overloaded"
  * 503, which is retryable the same as any other 5xx. Returns per-call token
@@ -61,6 +105,10 @@ function backoffDelayMs(attempt: number): number {
  * client for the cost-visibility display — there's no server-side store to
  * accumulate it in. Throws ModelCallError on final failure so the caller can
  * store it as a per-cell error rather than crashing the batch.
+ *
+ * Used by Attribution only — Rewriting's executeGeneration calls
+ * callModelOnce directly instead, with its own retry policy (see its
+ * comment above).
  *
  * `signal` (optional) is the /process route's own request signal — see
  * fetchTimeout.ts's long comment on why this matters: without it, pausing a
@@ -78,35 +126,11 @@ export async function callModel(
   prompt: string,
   signal?: AbortSignal
 ): Promise<ModelCallResult> {
-  if (!apiKey) {
-    throw new ModelCallError(
-      `No ${provider} API key configured. Add one in Settings.`,
-      false
-    );
-  }
-  if (!modelSnapshot) {
-    throw new ModelCallError(
-      `No ${provider} model snapshot configured. Add one in Settings.`,
-      false
-    );
-  }
-
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (signal?.aborted) throw new ModelCallError("Cancelled.", false);
     try {
-      // TEST MODE: a provider in test mode routes through Claude on the
-      // Anthropic key instead of its own, so that slot's pipeline can be
-      // exercised before its real budget exists — independently of whether
-      // the other slot already has a real key (see lib/apiKeys.ts). Taking a
-      // slot out of test mode (its own USE_CLAUDE_FOR_TESTING case) restores
-      // normal dispatch for it with no other code changes needed.
-      const result = isTestMode(provider)
-        ? await callAnthropic(apiKey, modelSnapshot, prompt, signal)
-        : provider === "GPT"
-          ? await callOpenAI(apiKey, modelSnapshot, prompt, signal)
-          : await callGemini(apiKey, modelSnapshot, prompt, signal);
-      return result;
+      return await callModelOnce(provider, apiKey, modelSnapshot, prompt, undefined, signal);
     } catch (err) {
       if (isAbortError(err)) throw new ModelCallError("Cancelled.", false);
       lastError = err;
@@ -122,3 +146,5 @@ export async function callModel(
     false
   );
 }
+
+export { backoffDelayMs, sleep };
