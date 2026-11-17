@@ -52,12 +52,6 @@ function clampPositiveInt(raw: string, fallback = 1): number {
   return Number.isFinite(n) && n >= 1 ? n : fallback;
 }
 
-/** Temperature is a 0-2 float for both providers' APIs — not a whole number like the counts above. */
-function clampTemperature(raw: string, fallback: number): number {
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 && n <= 2 ? n : fallback;
-}
-
 const inputClass =
   "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500";
 
@@ -82,8 +76,6 @@ export default function SettingsPage() {
   const [repCountRaw, setRepCountRaw] = useState<string | null>(null);
   const [wordCountRaw, setWordCountRaw] = useState<(string | null)[]>([null, null, null, null, null]);
   const [retryThresholdRaw, setRetryThresholdRaw] = useState<string | null>(null);
-  const [gptTemperatureRaw, setGptTemperatureRaw] = useState<string | null>(null);
-  const [geminiTemperatureRaw, setGeminiTemperatureRaw] = useState<string | null>(null);
   const [apiErrorRetryLimitRaw, setApiErrorRetryLimitRaw] = useState<string | null>(null);
   const [refusalEmptyRetryLimitRaw, setRefusalEmptyRetryLimitRaw] = useState<string | null>(null);
 
@@ -251,28 +243,6 @@ export default function SettingsPage() {
               className={inputClass + " font-mono"}
             />
           </Field>
-          <Field
-            label="GPT temperature"
-            htmlFor="gpt-temperature"
-            hint="Sent explicitly with every GPT rewriting call (§6). 0-2, provider default is 1."
-          >
-            <input
-              id="gpt-temperature"
-              aria-describedby="gpt-temperature-hint"
-              type="number"
-              min={0}
-              max={2}
-              step={0.1}
-              value={gptTemperatureRaw ?? String(data.gptTemperature)}
-              onChange={(e) => setGptTemperatureRaw(e.target.value)}
-              onBlur={() => {
-                if (gptTemperatureRaw === null) return;
-                update("gptTemperature", clampTemperature(gptTemperatureRaw, data.gptTemperature));
-                setGptTemperatureRaw(null);
-              }}
-              className={inputClass + " max-w-[8rem]"}
-            />
-          </Field>
         </div>
         <div className={data.enabledModels.Gemini ? undefined : "opacity-50"}>
           <label className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -297,28 +267,6 @@ export default function SettingsPage() {
               value={data.geminiModelSnapshot}
               onChange={(e) => update("geminiModelSnapshot", e.target.value)}
               className={inputClass + " font-mono"}
-            />
-          </Field>
-          <Field
-            label="Gemini temperature"
-            htmlFor="gemini-temperature"
-            hint="Sent explicitly with every Gemini rewriting call (§6). 0-2, provider default is around 1."
-          >
-            <input
-              id="gemini-temperature"
-              aria-describedby="gemini-temperature-hint"
-              type="number"
-              min={0}
-              max={2}
-              step={0.1}
-              value={geminiTemperatureRaw ?? String(data.geminiTemperature)}
-              onChange={(e) => setGeminiTemperatureRaw(e.target.value)}
-              onBlur={() => {
-                if (geminiTemperatureRaw === null) return;
-                update("geminiTemperature", clampTemperature(geminiTemperatureRaw, data.geminiTemperature));
-                setGeminiTemperatureRaw(null);
-              }}
-              className={inputClass + " max-w-[8rem]"}
             />
           </Field>
         </div>

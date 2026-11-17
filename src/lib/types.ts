@@ -41,14 +41,6 @@ export interface Settings {
   // misses its word-count target — no retrying on word count at all.
   retryThresholdEnabled: boolean;
 
-  // Generation parameters sent explicitly to each model's API (§6) —
-  // previously neither provider call sent a temperature at all, leaving it
-  // at whatever the provider's own default is. Free-form per-model so GPT
-  // and Gemini can be tuned independently; no study-mandated default, so
-  // these just start at each API's own baseline (1.0).
-  gptTemperature: number;
-  geminiTemperature: number;
-
   // Rewriting retry budgets (§5), explicit and adjustable rather than
   // hardcoded — separate from retryThresholdFraction/Enabled above, which
   // governs *word-count* ("off_target") retries only:
@@ -85,8 +77,6 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultWordCountTargets: [49, 40, 33, 27, 22],
   retryThresholdFraction: 0.1,
   retryThresholdEnabled: true,
-  gptTemperature: 1,
-  geminiTemperature: 1,
   apiErrorRetryLimit: 5,
   refusalEmptyRetryLimit: 3,
 };

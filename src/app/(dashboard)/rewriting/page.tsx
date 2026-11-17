@@ -199,8 +199,6 @@ export default function RewritingPage() {
     retryThresholdEnabled: boolean,
     apiErrorRetryLimit: number,
     refusalEmptyRetryLimit: number,
-    gptTemperature: number,
-    geminiTemperature: number,
     signal?: AbortSignal
   ) {
     const res = await fetch("/api/rewriting/process", {
@@ -213,8 +211,6 @@ export default function RewritingPage() {
         retryThresholdEnabled,
         apiErrorRetryLimit,
         refusalEmptyRetryLimit,
-        gptTemperature,
-        geminiTemperature,
       }),
       signal,
     });
@@ -283,8 +279,6 @@ export default function RewritingPage() {
             working.retryThresholdEnabled,
             settings.apiErrorRetryLimit,
             settings.refusalEmptyRetryLimit,
-            settings.gptTemperature,
-            settings.geminiTemperature,
             controller.signal
           );
         } catch (err) {

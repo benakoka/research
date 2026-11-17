@@ -16,6 +16,13 @@ import { RewritingChain } from "@/lib/types";
 // up the rest.
 const MAX_BATCH_SIZE = 6;
 
+// §6: sent explicitly with every rewriting call rather than left unset
+// (the provider's own default happens to be the same value, 1.0, but
+// sending it explicitly means a future provider default change can't
+// silently change this study's behavior). Not user-configurable — there's
+// no reason this run should ever need to be anything else.
+const TEMPERATURE = 1;
+
 // NOT setting an explicit `maxDuration` here on purpose — a prior attempt at
 // this (`export const maxDuration = 60`) caused every request to this route
 // to crash immediately at the platform level (Vercel's generic error page,
@@ -33,13 +40,11 @@ interface ProcessBody {
   promptTemplate: string;
   retryThresholdFraction: number;
   retryThresholdEnabled: boolean;
-  // §5's explicit retry budgets and §6's per-model temperature — stateless
-  // like everything else here, so the client (which reads Settings) sends
-  // them on every call rather than the route reading them from anywhere.
+  // §5's explicit retry budgets — stateless like everything else here, so
+  // the client (which reads Settings) sends them on every call rather than
+  // the route reading them from anywhere.
   apiErrorRetryLimit: number;
   refusalEmptyRetryLimit: number;
-  gptTemperature: number;
-  geminiTemperature: number;
 }
 
 export const POST = withApiErrorHandling(async (req: NextRequest) => {
@@ -58,14 +63,13 @@ export const POST = withApiErrorHandling(async (req: NextRequest) => {
 
   const updatedChains = await Promise.all(
     runnable.map(async ({ chain, genIndex }) => {
-      const temperature = chain.model === "GPT" ? body.gptTemperature : body.geminiTemperature;
       const { generation, newAttempts } = await executeGeneration(
         body.promptTemplate,
         body.retryThresholdFraction,
         body.retryThresholdEnabled,
         body.apiErrorRetryLimit,
         body.refusalEmptyRetryLimit,
-        temperature,
+        TEMPERATURE,
         chain,
         genIndex,
         req.signal
