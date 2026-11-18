@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import VignetteUploader from "../VignetteUploader";
-import { buildRewritingChains, nextRunnableGenerationIndex, pendingGeneration } from "@/lib/rewriting";
+import { applyAttemptLogToChains, buildRewritingChains, nextRunnableGenerationIndex, pendingGeneration } from "@/lib/rewriting";
 import {
   getSettings,
   getRewritingRun,
@@ -12,7 +12,7 @@ import {
 } from "@/lib/clientStorage";
 import { RewritingChain, RewritingRun, VignetteSet } from "@/lib/types";
 import { EtaSample, estimateEtaSeconds, formatEta, pushEtaSample } from "@/lib/eta";
-import { buildRewritingAttemptLogCsv } from "@/lib/export/rewritingAttemptLog";
+import { buildRewritingAttemptLogCsv, parseAttemptLogCsv } from "@/lib/export/rewritingAttemptLog";
 
 // Kept small deliberately: Promise.all in the /process route waits for the
 // slowest generation in a batch, so a larger batch means more concurrent
@@ -476,6 +476,78 @@ export default function RewritingPage() {
     }
   }
 
+  // Recovery path for when this browser's storage was lost/reset but an
+  // attempt-log CSV exported before that still exists (§ see
+  // lib/rewriting.ts's applyAttemptLogToChains for the actual merge).
+  // Rebuilds chains fresh from the re-uploaded vignette set (the log alone
+  // doesn't carry domain/valence/word-count targets/names), then restores
+  // whichever generations the log shows as already successfully done, and
+  // resumes the run from there instead of starting over from scratch.
+  async function resumeFromAttemptLog(file: File) {
+    if (!vignetteSet) {
+      setError(
+        "Upload the same vignette set first — the attempt log alone doesn't carry domain/valence/word-count targets/names, only what was generated."
+      );
+      return;
+    }
+    const rowsToRun = vignetteSet.rows.filter((r) => selectedIds.has(r.vignette_id));
+    if (rowsToRun.length === 0) {
+      setError("Select at least the vignette rows from the run you're recovering before resuming from an attempt log.");
+      return;
+    }
+    if (run && overallStats(run.chains).pending + overallStats(run.chains).running > 0) {
+      if (!confirm("There's an unfinished run in this browser already. Resuming from the attempt log replaces it. Continue?"))
+        return;
+    }
+    setStarting(true);
+    setError(null);
+    try {
+      const settings = getSettings();
+      if (!settings.enabledModels.GPT && !settings.enabledModels.Gemini) {
+        setError("Both GPT and Gemini are turned off in Settings — enable at least one before resuming.");
+        return;
+      }
+      const text = await file.text();
+      const attemptLog = parseAttemptLogCsv(text);
+      const freshChains = buildRewritingChains(
+        rowsToRun,
+        settings.defaultWordCountTargets,
+        settings.gptModelSnapshot,
+        settings.geminiModelSnapshot,
+        settings.enabledModels
+      );
+      const chains = applyAttemptLogToChains(freshChains, attemptLog);
+      const restoredCount = chains.reduce(
+        (n, c) => n + c.generations.slice(1).filter((g) => g.status === "done").length,
+        0
+      );
+      const recoveredRun: RewritingRun = {
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        promptTemplate: settings.rewritingPromptTemplate,
+        gptModelSnapshot: settings.gptModelSnapshot,
+        geminiModelSnapshot: settings.geminiModelSnapshot,
+        retryThresholdFraction: settings.retryThresholdFraction,
+        retryThresholdEnabled: settings.retryThresholdEnabled,
+        vignetteSetFilename: vignetteSet.filename,
+        selectedVignetteIds: rowsToRun.map((r) => r.vignette_id),
+        chains,
+        status: "pending",
+      };
+      persist(recoveredRun);
+      if (restoredCount === 0) {
+        setError(
+          "Restored 0 generations from that attempt log — check you selected the same vignette rows as the run you're recovering, and that this is the right file."
+        );
+      }
+      driveRun(recoveredRun);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't read that attempt log file.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
   async function retryGeneration(chainId: string, gen: number) {
     if (!run) return;
     const key = `${chainId}:${gen}`;
@@ -662,6 +734,23 @@ export default function RewritingPage() {
               Discard current run
             </button>
           )}
+          <label
+            className="text-sm text-slate-500 underline hover:text-slate-700 cursor-pointer"
+            title="Recovery: if this browser's storage was ever lost/reset mid-run, pick a previously-downloaded attempt-log CSV here (with the same vignette rows selected above) to restore every generation it shows as already done, instead of starting over."
+          >
+            {starting ? "Recovering…" : "Resume from attempt log…"}
+            <input
+              type="file"
+              accept=".csv"
+              className="hidden"
+              disabled={starting || processing}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) resumeFromAttemptLog(file);
+              }}
+            />
+          </label>
         </div>
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       </section>

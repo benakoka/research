@@ -4,6 +4,7 @@
 import {
   RewritingChain,
   RewritingGeneration,
+  RewriteAttemptLog,
   VignetteRow,
   ModelProvider,
 } from "./types";
@@ -110,6 +111,81 @@ export function buildRewritingChains(
     }
   }
   return chains;
+}
+
+/**
+ * Recovery path for when a run's localStorage state was lost (browser
+ * storage cleared/reset) but an attempt-log CSV export from it still
+ * exists. Rebuilds a run's completed-so-far progress from that log rather
+ * than starting over from scratch.
+ *
+ * Takes freshly-built chains (buildRewritingChains, over the same
+ * vignette rows/settings as the original run) and, for each one, marks
+ * every generation "done" that the log shows a successful attempt for —
+ * stopping at the first generation that doesn't have one, so a chain's
+ * strict 1→2→3→4→5 order is never violated even if the log were somehow
+ * missing an earlier generation's success. Everything from that point on
+ * is left exactly as buildRewritingChains made it ("pending"), ready for
+ * the normal run engine to actually produce.
+ *
+ * Matched by vignette_id + model, not chain_id — chain_id is only ever a
+ * label assigned by build order (buildRewritingChains's own counter), not
+ * a stable identity, so it can't be trusted to still mean the same chain
+ * after a rebuild (e.g. a different row selection would shift every
+ * chain_id). vignette_id is unique per uploaded row and never changes, so
+ * it's the only reliable key across a rebuild.
+ */
+export function applyAttemptLogToChains(
+  chains: RewritingChain[],
+  attemptLog: RewriteAttemptLog[]
+): RewritingChain[] {
+  const successByKey = new Map<string, RewriteAttemptLog>();
+  const logByVignetteModel = new Map<string, RewriteAttemptLog[]>();
+  for (const a of attemptLog) {
+    const vmKey = `${a.vignette_id}::${a.model_requested}`;
+    const arr = logByVignetteModel.get(vmKey);
+    if (arr) arr.push(a);
+    else logByVignetteModel.set(vmKey, [a]);
+
+    if (a.outcome !== "success") continue;
+    const key = `${vmKey}::${a.generation}`;
+    const existing = successByKey.get(key);
+    // Last one wins if the log somehow has more than one success logged
+    // for the same slot (e.g. a manual retry happened after an earlier
+    // export was taken, then both were merged together).
+    if (!existing || a.timestamp >= existing.timestamp) successByKey.set(key, a);
+  }
+
+  return chains.map((chain) => {
+    const generations = chain.generations.map((g) => ({ ...g }));
+    for (let gen = 1; gen <= 5; gen++) {
+      if (generations[gen - 1].status !== "done") break;
+      const hit = successByKey.get(`${chain.vignette_id}::${chain.model}::${gen}`);
+      if (!hit) break;
+      generations[gen] = {
+        generation: gen,
+        text: hit.output_text,
+        target_word_count: hit.target_words,
+        actual_word_count: hit.output_words,
+        status: "done",
+        attempts: [],
+        raw_response: hit.raw_response,
+        error: null,
+        timestamp: hit.timestamp,
+      };
+    }
+    return {
+      ...chain,
+      generations,
+      // Re-attached under this (possibly new) chain.id — note that these
+      // imported rows still carry whatever chain_id they were logged
+      // under originally, which may now differ from this chain's own id.
+      // That's cosmetic only (chain_id is a label, not what anything here
+      // keys on) — harmless for a combined export going forward.
+      attemptLog: logByVignetteModel.get(`${chain.vignette_id}::${chain.model}`) ?? [],
+      failedAtGeneration: null,
+    };
+  });
 }
 
 /** Index of the next generation (1-5) ready to run, or null if the chain is done/blocked. */
