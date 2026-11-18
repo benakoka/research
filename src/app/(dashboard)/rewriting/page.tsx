@@ -12,6 +12,7 @@ import {
 } from "@/lib/clientStorage";
 import { RewritingChain, RewritingRun, VignetteSet } from "@/lib/types";
 import { EtaSample, estimateEtaSeconds, formatEta, pushEtaSample } from "@/lib/eta";
+import { buildRewritingAttemptLogCsv } from "@/lib/export/rewritingAttemptLog";
 
 // Kept small deliberately: Promise.all in the /process route waits for the
 // slowest generation in a batch, so a larger batch means more concurrent
@@ -53,11 +54,23 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+// attemptLog is by far the biggest thing a chain carries — every attempt's
+// full raw provider response, growing with every retry a run ever made —
+// and only the "attempt_log" export format actually needs it server-side.
+// Sending it along with every other export format risked a real run's
+// request body blowing past the platform's request-size limit for no
+// reason, which is exactly what silently broke every export button on a
+// large run, not just that one. Stripped here rather than in the API
+// route so the oversized payload is never sent at all.
+function withoutAttemptLog(chains: RewritingChain[]): RewritingChain[] {
+  return chains.map((c) => ({ ...c, attemptLog: [] }));
+}
+
 async function fetchExport(chains: RewritingChain[], format: ExportFormat): Promise<Blob> {
   const res = await fetch("/api/rewriting/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chains, format }),
+    body: JSON.stringify({ chains: withoutAttemptLog(chains), format }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -158,6 +171,16 @@ export default function RewritingPage() {
   }
 
   async function downloadExport(chains: RewritingChain[], format: ExportFormat) {
+    // Built directly in the browser, not round-tripped through the API —
+    // this is precisely the export carrying the data too big to safely
+    // send over the wire (see withoutAttemptLog's comment above). It's a
+    // pure string builder (lib/export/rewritingAttemptLogCsv.ts) with no
+    // server secrets, so there's nothing it needs the server for.
+    if (format === "attempt_log") {
+      const csv = buildRewritingAttemptLogCsv(chains);
+      downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), EXPORT_FILENAMES[format]);
+      return;
+    }
     const blob = await fetchExport(chains, format);
     downloadBlob(blob, EXPORT_FILENAMES[format]);
   }
