@@ -233,7 +233,7 @@ export default function SettingsPage() {
           <Field
             label="GPT model snapshot"
             htmlFor="gpt-model-snapshot"
-            hint={keyStatus?.gptTestMode ? "Test mode: enter a Claude model ID here, not a GPT one." : "Recommended: gpt-5.6"}
+            hint={keyStatus?.gptTestMode ? "Test mode: enter a Claude model ID here, not a GPT one." : "Recommended: gpt-6.2-sol"}
           >
             <input
               id="gpt-model-snapshot"
@@ -258,7 +258,7 @@ export default function SettingsPage() {
             label="Gemini model snapshot"
             htmlFor="gemini-model-snapshot"
             hint={
-              keyStatus?.geminiTestMode ? "Test mode: enter a Claude model ID here, not a Gemini one." : "Recommended: gemini-3.6-flash"
+              keyStatus?.geminiTestMode ? "Test mode: enter a Claude model ID here, not a Gemini one." : "Recommended: gemini-4-hydrogen"
             }
           >
             <input

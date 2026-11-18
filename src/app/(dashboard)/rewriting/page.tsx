@@ -454,6 +454,30 @@ export default function RewritingPage() {
     }
   }
 
+  // One click to recover from something like running out of API credit
+  // mid-run: every chain that failed (exhausted a retry budget — see
+  // lib/rewritingExec.ts §5) gets its failed generation, and everything
+  // after it, reset to pending, exactly like a single retryGeneration call,
+  // then the whole batch is handed back to driveRun. No need to restart
+  // the run from scratch — everything already completed stays as-is.
+  async function retryAllErrors() {
+    if (!run || runningRef.current) return;
+    setError(null);
+    const chains = run.chains.map((chain) => {
+      if (chain.failedAtGeneration === null) return chain;
+      const gen = chain.failedAtGeneration;
+      const generations = [...chain.generations];
+      generations[gen] = { ...generations[gen], status: "pending", error: null };
+      for (let i = gen + 1; i <= 5; i++) {
+        generations[i] = pendingGeneration(i, chain.wordCountTargets[i - 1]);
+      }
+      return { ...chain, generations, failedAtGeneration: null };
+    });
+    const resetRun = { ...run, chains, status: "running" as const };
+    persist(resetRun);
+    await driveRun(resetRun);
+  }
+
   function startOver() {
     if (!confirm("Discard the current run? This can't be undone unless you've already exported it.")) return;
     clearRewritingRun();
@@ -625,10 +649,20 @@ export default function RewritingPage() {
               </div>
             )}
             {failedChains.length > 0 && (
-              <p className="mt-1 text-xs text-red-700">
-                ⚠ {failedChains.length} chain{failedChains.length === 1 ? "" : "s"} failed — never skipped, just
-                stopped: {failedChains.map((c) => `${c.id} at generation ${c.failedAtGeneration}`).join("; ")}.
-              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <p className="text-xs text-red-700">
+                  ⚠ {failedChains.length} chain{failedChains.length === 1 ? "" : "s"} failed — never skipped, just
+                  stopped: {failedChains.map((c) => `${c.id} at generation ${c.failedAtGeneration}`).join("; ")}.
+                </p>
+                <button
+                  onClick={retryAllErrors}
+                  disabled={processing}
+                  title="Resets every failed chain's failed generation (and everything after it) to pending, then resumes — nothing already completed is touched. Use this after fixing whatever caused the failures, e.g. adding more API credit."
+                  className="text-xs font-medium text-slate-700 underline hover:text-slate-900 disabled:opacity-50"
+                >
+                  Retry all errors
+                </button>
+              </div>
             )}
 
             <div className="mt-4 flex flex-wrap gap-3">
