@@ -66,6 +66,22 @@ function withoutAttemptLog(chains: RewritingChain[]): RewritingChain[] {
   return chains.map((c) => ({ ...c, attemptLog: [] }));
 }
 
+// What actually gets written to localStorage — see persist()'s comment for
+// why attemptLog and generation.raw_response (the two biggest, and in
+// raw_response's case entirely unused, fields a chain carries) are left
+// out of the stored copy even though the in-memory run keeps them for
+// Export.
+function toStorableRun(run: RewritingRun): RewritingRun {
+  return {
+    ...run,
+    chains: run.chains.map((c) => ({
+      ...c,
+      attemptLog: [],
+      generations: c.generations.map((g) => ({ ...g, raw_response: null })),
+    })),
+  };
+}
+
 async function fetchExport(chains: RewritingChain[], format: ExportFormat): Promise<Blob> {
   const res = await fetch("/api/rewriting/export", {
     method: "POST",
@@ -150,11 +166,32 @@ export default function RewritingPage() {
   }
 
   function persist(updated: RewritingRun) {
+    // Full in-memory state (attemptLog included) is what the UI reads and
+    // what Export uses — nothing here changes what you can export right
+    // now, in this tab.
     setRun(updated);
-    const ok = saveRewritingRun(updated);
+    // What actually goes to localStorage is deliberately smaller.
+    // attemptLog — every attempt's full raw provider response — grows for
+    // the whole lifetime of a run and was previously saved on *every
+    // single batch*, not just on export: for any run of real size, that
+    // alone is enough to exhaust a browser's storage quota long before the
+    // run finishes (confirmed against a real run that silently stopped
+    // saving as early as 17% in). It only needs to survive long enough to
+    // export it, not across a reload — so it's kept in memory only, not
+    // persisted. generation.raw_response (unused by any export) is
+    // likewise dropped from the stored copy. Export the attempt log before
+    // reloading or closing this tab if you want to keep it.
+    const ok = saveRewritingRun(toStorableRun(updated));
     if (!ok) {
+      // A write still failing even after dropping the heavy fields means
+      // continuing the run risks losing *more* unsaved progress with every
+      // further batch — auto-pause immediately (same as clicking Pause)
+      // rather than silently racking up progress that can never be saved,
+      // which is what caused real data loss before this fix. The run can
+      // be resumed manually once there's room again.
+      pauseRequestedRef.current = true;
       setStorageWarning(
-        "This browser's storage is full, so new results are no longer being saved — they only exist in this tab until you export. Export now, or free up space (clear old runs/other sites' data) and reload to resume normal saving."
+        "STOPPED: this browser's storage is completely full, so the run has been paused automatically — nothing further can be saved safely. Export what you have now (the buttons below work from this tab's current state regardless of storage), then free up space (e.g. clear an old Attribution run in this same browser) before clicking Resume."
       );
       return;
     }
@@ -165,7 +202,7 @@ export default function RewritingPage() {
     const frac = estimateLocalStorageUsageFraction();
     if (frac >= 0.8) {
       setStorageWarning(
-        `This browser's local storage is at roughly ${Math.round(frac * 100)}% of an assumed ~5MB per-origin limit — export soon, or it may silently stop saving new results.`
+        `This browser's local storage is at roughly ${Math.round(frac * 100)}% of an assumed ~5MB per-origin limit — export soon, or it may pause the run and stop saving new results.`
       );
     }
   }
