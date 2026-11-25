@@ -17,7 +17,7 @@ import { EtaSample, estimateEtaSeconds, formatEta, pushEtaSample } from "@/lib/e
 // Kept small deliberately: Promise.all in the /process route waits for the
 // slowest cell in a batch, so a larger batch means more concurrent cells
 // sharing the risk of one being slow under real provider demand (e.g.
-// Gemini taking close to its 45s timeout) — a smaller batch surfaces
+// Gemini taking close to its 75s timeout) — a smaller batch surfaces
 // progress more often and bounds how much a single slow cell can hold up.
 const BATCH_SIZE = 4;
 // How many /process requests driveRun keeps in flight at once (see the
@@ -156,7 +156,7 @@ export default function AttributionPage() {
         // Same model only, not just "the next BATCH_SIZE pending cells" —
         // the /process route's Promise.all waits for the slowest cell in
         // the batch, and GPT/Gemini have very different latency profiles
-        // (Gemini can run close to its 45s timeout, or need several
+        // (Gemini can run close to its 75s timeout, or need several
         // automatic retries for a non-numeric response). A batch mixing
         // both means fast GPT cells sit idle waiting on a slow Gemini one
         // for no reason; keeping each batch single-model means a slow

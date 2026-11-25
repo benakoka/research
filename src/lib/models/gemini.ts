@@ -32,9 +32,15 @@ export async function callGemini(
       // real demand it can genuinely take longer than that to respond at
       // all (not erroring, just slow) — retrying a call that consistently
       // needs more time than the timeout doesn't help, it just repeats the
-      // same cutoff. GPT/Anthropic haven't shown this, so left at the
-      // shared default rather than bumped speculatively.
-      45_000,
+      // same cutoff every attempt, which is exactly what was observed on a
+      // real large run: every attempt failed with "Gemini: Request timed
+      // out after 45s," never a real error from Google, until the retry
+      // budget ran out — i.e. our own cutoff, not Gemini, was the actual
+      // failure. Raised from 45s to give slow-but-real responses more room
+      // to land naturally instead of always getting cut off. GPT/Anthropic
+      // haven't shown this, so left at the shared default rather than
+      // bumped speculatively.
+      75_000,
       signal
     );
   } catch (err) {

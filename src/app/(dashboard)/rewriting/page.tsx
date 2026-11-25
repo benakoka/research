@@ -17,7 +17,7 @@ import { buildRewritingAttemptLogCsv, parseAttemptLogCsv } from "@/lib/export/re
 // Kept small deliberately: Promise.all in the /process route waits for the
 // slowest generation in a batch, so a larger batch means more concurrent
 // generations sharing the risk of one being slow under real provider demand
-// (e.g. Gemini taking close to its 45s timeout) — a smaller batch surfaces
+// (e.g. Gemini taking close to its 75s timeout) — a smaller batch surfaces
 // progress more often and bounds how much a single slow generation can hold
 // up.
 const BATCH_SIZE = 4;
